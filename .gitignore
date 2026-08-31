@@ -1,0 +1,5 @@
+# Holds the copyparty password - never commit.
+library.env
+
+# macOS
+.DS_Store
