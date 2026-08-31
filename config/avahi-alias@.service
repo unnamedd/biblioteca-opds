@@ -1,0 +1,17 @@
+[Unit]
+Description=Avahi mDNS alias %i.local
+Documentation=man:avahi-publish(1)
+After=network-online.target avahi-daemon.service
+Wants=network-online.target
+Requires=avahi-daemon.service
+# restart with avahi so the record is re-published if the daemon bounces
+PartOf=avahi-daemon.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/lib/avahi-alias.sh %i
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,50 @@
+# Based on copyparty's contrib/systemd/copyparty.service, with the restart
+# policy upstream does not ship (we want it back after a crash) and a
+# CapabilityBoundingSet to match the ambient CAP_NET_BIND_SERVICE.
+
+[Unit]
+Description=copyparty file server (Biblioteca)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+SyslogIdentifier=copyparty
+Environment=PYTHONUNBUFFERED=x
+ExecReload=/bin/kill -s USR1 $MAINPID
+
+User=__SERVICE_USER__
+Group=__SERVICE_USER__
+WorkingDirectory=/var/lib/copyparty
+Environment=XDG_CONFIG_HOME=/var/lib/copyparty/.config
+
+# lets an unprivileged process bind :80
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# the requirement: come back if the process dies
+Restart=always
+RestartSec=5
+
+# 512 MB board - do not let one runaway upload take the whole machine
+MemoryMax=50%
+MemorySwapMax=50%
+
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+RemoveIPC=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+
+LogsDirectory=copyparty
+
+ExecStart=/usr/bin/python3 /usr/local/bin/copyparty-sfx.py -c /etc/copyparty.conf
+
+[Install]
+WantedBy=multi-user.target

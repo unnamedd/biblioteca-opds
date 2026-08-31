@@ -1,0 +1,9 @@
+# /etc/default/zramswap  --  installed by scripts/10-system.sh
+#
+# Compressed swap in RAM. On a 512 MB board this buys headroom without
+# grinding the SD card. lz4 is the cheap-CPU choice.
+
+ALGO=lz4
+
+# percentage of physical RAM used for the zram device
+PERCENT=50
