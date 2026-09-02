@@ -91,6 +91,52 @@ then `sudo systemctl reload copyparty` (the unit reloads on `SIGUSR1`, so no
 restart is needed). Re-running `scripts/30-copyparty.sh` does the same thing
 from the template and keeps the Pi reproducible.
 
+## Sharing the library with friends
+
+Give them their own read-only account rather than your password. Set in
+`library.env`:
+
+```ini
+GUEST_ACCOUNT=friends
+GUEST_PASSWORD=          # blank -> generated, printed once, saved back here
+```
+
+then re-run `scripts/30-copyparty.sh`. It renders:
+
+```ini
+[accounts]
+  reader: <your password>
+  friends: <their password>
+
+[/books]
+  /srv/books
+  accs:
+    r: friends     # list + download; enough for the web UI and for OPDS
+    rwmd: reader   # only you
+```
+
+Nothing is copied and no second folder is needed — it is the same library seen
+through a weaker login. Verified behaviour:
+
+| action | anonymous | `friends` | you |
+| ------ | --------- | --------- | --- |
+| browse the OPDS feed | 403 | **200** | 200 |
+| download a book | 403 | **200** | 200 |
+| upload | 401 | **401** | 201 |
+| delete | 401 | **401** | 200 |
+| rename | 401 | **401** | 200 |
+
+Friends can point their own OPDS apps at the same URL. To revoke, clear
+`GUEST_ACCOUNT` and re-run the script; your own login is unaffected.
+
+`scripts/50-verify.sh` checks all three identities, so a mistake that hands your
+friends write access fails the run instead of going unnoticed.
+
+**If you ever want no password at all** for readers, `r: *` in place of
+`r: friends` opens the library to everyone. Think twice with Funnel on: that
+means the public internet, and Funnel hostnames are published to Certificate
+Transparency logs, so the address is discoverable rather than secret.
+
 ## No cover images in the catalogue
 
 Expected with the default config, and it is the `no-thumb` flag rather than a

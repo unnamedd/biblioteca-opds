@@ -7,6 +7,9 @@ A self-hosted OPDS library for devices running [CrossPoint Reader](https://githu
 - Runs in about **100 MB of RAM**, no Docker, no database.
 - Catalogue is filename-based — name files `Author - Title.epub`. Cover
   thumbnails are off by default to save CPU (`ENABLE_COVERS=1` turns them on).
+- **A second, read-only account for friends** — they get their own password,
+  browse and download the whole library (no copies, no separate folder), and
+  cannot upload, rename or delete (`GUEST_ACCOUNT`).
 - Starts at boot and restarts if it dies.
 
 ```

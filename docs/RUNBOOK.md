@@ -209,6 +209,25 @@ Two behaviours worth knowing:
 - `rwmd` is read + write + move + delete. `rw` alone is not enough: the web UI
   and WebDAV both answer `403 'delete' not allowed` and renaming fails too.
   `A` is the shorthand for `rwmda.`, which also grants admin and dotfiles.
+- To share with friends, add a second account and give it `r` only. Nothing is
+  duplicated — it is the same folder, seen through a weaker login:
+
+  ```ini
+  [accounts]
+    reader: <your password>
+    friends: <their password>
+
+  [/books]
+    /srv/books
+    accs:
+      r: friends     # browse and download, nothing else
+      rwmd: reader   # you: upload, rename, delete
+  ```
+
+  `GUEST_ACCOUNT=friends` in `library.env` renders exactly that, generating a
+  separate password if you leave `GUEST_PASSWORD` blank. Because it is its own
+  account you can change or drop it later without touching your own login, and
+  the library is never exposed to anyone without a password.
 - `--opds-exts` defaults to `epub,cbz,pdf`. Add `mobi,azw3` if you keep those.
 - copyparty is **password-only** by default: the username field is ignored, and
   the password is accepted in *either* HTTP Basic field. CrossPoint sends a

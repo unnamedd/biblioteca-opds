@@ -45,32 +45,66 @@ else
   ok "installed $SFX"
 fi
 
-# --- password ----------------------------------------------------------------
-step "Account"
+# --- passwords ---------------------------------------------------------------
+step "Accounts"
+
+# alphanumeric only: the config file is line-oriented, and these get typed by
+# hand into the reader and read out loud to friends
+gen_password() {
+  python3 -c '
+import secrets, string
+a = string.ascii_letters + string.digits
+print("".join(secrets.choice(a) for _ in range(24)))'
+}
+
+if [ -n "${GUEST_ACCOUNT:-}" ] && [ "$GUEST_ACCOUNT" = "$COPYPARTY_ACCOUNT" ]; then
+  die "GUEST_ACCOUNT and COPYPARTY_ACCOUNT are both '$GUEST_ACCOUNT'; they must differ"
+fi
 
 GENERATED=0
 if [ -z "${COPYPARTY_PASSWORD:-}" ]; then
   if [ "$DRY_RUN" = "1" ]; then
     COPYPARTY_PASSWORD="<generated-at-run-time>"
   else
-    # alphanumeric only: the config file is line-oriented and the password
-    # also gets typed by hand into the reader
-    COPYPARTY_PASSWORD="$(python3 -c '
-import secrets, string
-a = string.ascii_letters + string.digits
-print("".join(secrets.choice(a) for _ in range(24)))')"
-    GENERATED=1
+    COPYPARTY_PASSWORD="$(gen_password)"; GENERATED=1
   fi
 fi
 
-case "$COPYPARTY_PASSWORD" in
-  *[![:alnum:]]*)
-    warn "password contains non-alphanumeric characters"
-    hint "that is fine for copyparty, but it is painful to type on the reader" ;;
-esac
+GUEST_GENERATED=0
+if [ -n "${GUEST_ACCOUNT:-}" ] && [ -z "${GUEST_PASSWORD:-}" ]; then
+  if [ "$DRY_RUN" = "1" ]; then
+    GUEST_PASSWORD="<generated-at-run-time>"
+  else
+    GUEST_PASSWORD="$(gen_password)"; GUEST_GENERATED=1
+  fi
+fi
+
+for _pw in "$COPYPARTY_PASSWORD" "${GUEST_PASSWORD:-}"; do
+  case "$_pw" in
+    "") ;;
+    *[![:alnum:]]*)
+      warn "a password contains non-alphanumeric characters"
+      hint "fine for copyparty, but painful to type on the reader" ;;
+  esac
+done
 
 # --- config ------------------------------------------------------------------
 step "Configuration"
+
+ACCOUNTS_LINES="  ${COPYPARTY_ACCOUNT}: ${COPYPARTY_PASSWORD}"
+ACCS_LINES="    rwmd: ${COPYPARTY_ACCOUNT}"
+
+if [ -n "${GUEST_ACCOUNT:-}" ]; then
+  ACCOUNTS_LINES="${ACCOUNTS_LINES}
+  ${GUEST_ACCOUNT}: ${GUEST_PASSWORD}"
+  # "r" is list + download: enough for the web UI and for OPDS, and it grants
+  # no upload, rename or delete
+  ACCS_LINES="    r: ${GUEST_ACCOUNT}
+${ACCS_LINES}"
+  info "accounts: ${COPYPARTY_ACCOUNT} (full) + ${GUEST_ACCOUNT} (read-only)"
+else
+  info "accounts: ${COPYPARTY_ACCOUNT} only (set GUEST_ACCOUNT to add a read-only one)"
+fi
 
 if [ "$ENABLE_COVERS" = "1" ]; then
   THUMB_LINE="  # covers on (ENABLE_COVERS=1); needs pillow or ffmpeg"
@@ -100,17 +134,19 @@ else
   BOOKS_DIR="$BOOKS_DIR" \
   BAN_PW_LINE="$BAN_PW_LINE" \
   THUMB_LINE="$THUMB_LINE" \
+  ACCS_LINES="$ACCS_LINES" \
+  ACCOUNTS_LINES="$ACCOUNTS_LINES" \
   python3 - "$CONFIG_DIR/copyparty.conf.template" "$TMP_CONF" <<'PY'
 import os, re, sys
 src, dst = sys.argv[1], sys.argv[2]
 text = open(src).read()
 for key, env in (
-    ("__PORT__",         "COPYPARTY_PORT"),
-    ("__ACCOUNT__",      "COPYPARTY_ACCOUNT"),
-    ("__PASSWORD__",     "COPYPARTY_PASSWORD"),
-    ("__BOOKS_DIR__",    "BOOKS_DIR"),
-    ("__BAN_PW_LINE__",  "BAN_PW_LINE"),
-    ("__THUMB_LINE__",   "THUMB_LINE"),
+    ("__PORT__",           "COPYPARTY_PORT"),
+    ("__BOOKS_DIR__",      "BOOKS_DIR"),
+    ("__BAN_PW_LINE__",    "BAN_PW_LINE"),
+    ("__THUMB_LINE__",     "THUMB_LINE"),
+    ("__ACCOUNTS_LINES__", "ACCOUNTS_LINES"),
+    ("__ACCS_LINES__",     "ACCS_LINES"),
 ):
     text = text.replace(key, os.environ[env])
 # an empty placeholder leaves a run of blank lines behind; tidy it up
@@ -153,6 +189,16 @@ if [ "$DRY_RUN" != "1" ]; then
 fi
 
 # --- report ------------------------------------------------------------------
+if [ "$GUEST_GENERATED" = "1" ]; then
+  save_env GUEST_PASSWORD "$GUEST_PASSWORD"
+  echo
+  printf '%s┌─ read-only guest password (saved to library.env) ───────%s\n' "$C_YEL" "$C_RESET"
+  printf '%s│%s  user: %s\n' "$C_YEL" "$C_RESET" "$GUEST_ACCOUNT"
+  printf '%s│%s  pass: %s%s%s\n' "$C_YEL" "$C_RESET" "$C_BOLD" "$GUEST_PASSWORD" "$C_RESET"
+  printf '%s│%s  this is the one to give your friends\n' "$C_YEL" "$C_RESET"
+  printf '%s└────────────────────────────────────────────────────────%s\n' "$C_YEL" "$C_RESET"
+fi
+
 if [ "$GENERATED" = "1" ]; then
   save_env COPYPARTY_PASSWORD "$COPYPARTY_PASSWORD"
   echo

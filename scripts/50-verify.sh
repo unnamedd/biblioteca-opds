@@ -127,14 +127,51 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-step "5. the library is not readable without credentials"
+step "5. access control"
 
+# (a) nobody gets in without credentials
 CODE="$(curl -sS --max-time 20 -o /tmp/xl-anon.$$ -w '%{http_code}' "$OPDS_URL" 2>/dev/null || echo 000)"
 ANON="$(cat /tmp/xl-anon.$$ 2>/dev/null || true)"; rm -f /tmp/xl-anon.$$
 if printf '%s' "$ANON" | grep -qi '<feed'; then
-  check_fail "anonymous request returned a feed (http $CODE) - the volume is public!"
+  check_fail "anonymous request returned a feed (http $CODE) - the library is public!"
 else
   check_ok "anonymous request does not expose the catalogue (http $CODE)"
+fi
+
+# (b) the read-only account, if you configured one
+if [ -z "${GUEST_ACCOUNT:-}" ]; then
+  check_skip "no GUEST_ACCOUNT configured"
+elif [ -z "${GUEST_PASSWORD:-}" ]; then
+  check_skip "GUEST_ACCOUNT set but no GUEST_PASSWORD in library.env"
+else
+  G="${GUEST_ACCOUNT}:${GUEST_PASSWORD}"
+
+  GBODY="$(curl -sS --max-time 20 -u "$G" "$OPDS_URL" 2>/dev/null || true)"
+  if printf '%s' "$GBODY" | grep -qi '<feed'; then
+    check_ok "guest '${GUEST_ACCOUNT}' can browse the catalogue"
+  else
+    check_fail "guest '${GUEST_ACCOUNT}' cannot read the catalogue"
+  fi
+
+  # probe a path that does not exist, so no real book can be touched even if
+  # the permissions turn out to be wrong
+  PROBE="${LAN}/books/.biblioteca-write-probe"
+  for m in DELETE MOVE; do
+    hdr=(); [ "$m" = "MOVE" ] && hdr=(-H "Destination: ${PROBE}-2")
+    c="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -u "$G" -X "$m" "${hdr[@]}" "$PROBE" 2>/dev/null || echo 000)"
+    case "$c" in
+      401|403) check_ok "guest $m refused (http $c)" ;;
+      *)       check_fail "guest $m returned http $c - your friends can $m!" ;;
+    esac
+  done
+
+  c="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -u "$G" -T /dev/null "$PROBE" 2>/dev/null || echo 000)"
+  case "$c" in
+    401|403) check_ok "guest upload refused (http $c)" ;;
+    *)       check_fail "guest upload returned http $c - your friends can upload!"
+             curl -sS --max-time 20 -o /dev/null -u "${COPYPARTY_ACCOUNT}:${COPYPARTY_PASSWORD}" \
+                  -X DELETE "$PROBE" 2>/dev/null || true ;;
+  esac
 fi
 
 # ---------------------------------------------------------------------------
@@ -214,6 +251,19 @@ cat <<EOF
     │ URL      │ https://${TS_HOST}/books/?opds
     │ User     │ ${COPYPARTY_ACCOUNT}
     │ Password │ ${COPYPARTY_PASSWORD:-<see library.env>}
+    └──────────┴────────────────────────────────────────────────────────────┘
+EOF
+fi
+
+if [ -n "${GUEST_ACCOUNT:-}" ]; then
+cat <<EOF
+
+  Give your friends these — read-only, they cannot change anything:
+    ┌──────────┬────────────────────────────────────────────────────────────┐
+    │ URL      │ ${BOOKS_URL}
+    │ OPDS     │ ${OPDS_URL}
+    │ User     │ ${GUEST_ACCOUNT}
+    │ Password │ ${GUEST_PASSWORD:-<see library.env>}
     └──────────┴────────────────────────────────────────────────────────────┘
 EOF
 fi

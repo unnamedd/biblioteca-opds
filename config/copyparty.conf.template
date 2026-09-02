@@ -39,7 +39,7 @@ __THUMB_LINE__
 __BAN_PW_LINE__
 
 [accounts]
-  __ACCOUNT__: __PASSWORD__
+__ACCOUNTS_LINES__
 
 [/books]
   __BOOKS_DIR__
@@ -47,6 +47,9 @@ __BAN_PW_LINE__
     # r=read w=upload m=move/rename d=delete. Without "d" the web UI and
     # WebDAV both answer 403 "'delete' not allowed"; without "m" you cannot
     # rename either. Use "A" instead for rwmda. (adds admin + dotfiles).
-    rwmd: __ACCOUNT__
+    # Set GUEST_ACCOUNT in library.env to add a second, read-only account:
+    # friends sign in with their own password, browse and download the whole
+    # library, and cannot upload, rename or delete anything.
+__ACCS_LINES__
   flags:
     opds
