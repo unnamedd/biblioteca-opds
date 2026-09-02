@@ -63,6 +63,34 @@ journalctl -u copyparty -n 50
 - Check the feed by hand:
   `curl -u reader:PASS 'http://biblioteca.local/books/?opds'`
 
+## Deleting (or renaming) a file fails
+
+The web UI shows an error and WebDAV returns `403 'delete' not allowed for user
+<name>`. The account is missing the permission — copyparty's letters are
+granted explicitly:
+
+| letter | grants |
+| ------ | ------ |
+| `r` | list folders, download files |
+| `w` | upload files |
+| `m` | move / rename |
+| `d` | delete permanently |
+| `A` | shorthand for `rwmda.` — the above plus admin and dotfiles |
+
+`rw` alone can upload but never remove, which is easy to miss because uploading
+works fine. Fix it in `/etc/copyparty.conf`:
+
+```ini
+[/books]
+  /srv/books
+  accs:
+    rwmd: <your account>
+```
+
+then `sudo systemctl reload copyparty` (the unit reloads on `SIGUSR1`, so no
+restart is needed). Re-running `scripts/30-copyparty.sh` does the same thing
+from the template and keeps the Pi reproducible.
+
 ## No cover images in the catalogue
 
 Expected with the default config. `no-thumb` is set because extracting EPUB

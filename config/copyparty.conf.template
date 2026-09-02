@@ -41,6 +41,9 @@ __BAN_PW_LINE__
 [/books]
   __BOOKS_DIR__
   accs:
-    rw: __ACCOUNT__
+    # r=read w=upload m=move/rename d=delete. Without "d" the web UI and
+    # WebDAV both answer 403 "'delete' not allowed"; without "m" you cannot
+    # rename either. Use "A" instead for rwmda. (adds admin + dotfiles).
+    rwmd: __ACCOUNT__
   flags:
     opds

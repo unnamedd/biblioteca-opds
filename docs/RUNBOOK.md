@@ -177,7 +177,7 @@ sudo tee /etc/copyparty.conf >/dev/null <<'EOF'
 [/books]
   /srv/books
   accs:
-    rw: reader
+    rwmd: reader
   flags:
     opds
 EOF
@@ -204,6 +204,9 @@ What each line is for:
 
 Two behaviours worth knowing:
 
+- `rwmd` is read + write + move + delete. `rw` alone is not enough: the web UI
+  and WebDAV both answer `403 'delete' not allowed` and renaming fails too.
+  `A` is the shorthand for `rwmda.`, which also grants admin and dotfiles.
 - `--opds-exts` defaults to `epub,cbz,pdf`. Add `mobi,azw3` if you keep those.
 - copyparty is **password-only** by default: the username field is ignored, and
   the password is accepted in *either* HTTP Basic field. CrossPoint sends a
