@@ -73,8 +73,8 @@ esac
 step "Configuration"
 
 if [ "$ENABLE_COVERS" = "1" ]; then
-  THUMB_LINE="  # covers on (ENABLE_COVERS=1); needs python3-pil"
-  info "cover thumbnails: enabled"
+  THUMB_LINE="  # covers on (ENABLE_COVERS=1); needs pillow or ffmpeg"
+  info "cover thumbnails: enabled (needs pillow or ffmpeg; 10-system.sh installs python3-pil)"
 else
   THUMB_LINE="  no-thumb"
   info "cover thumbnails: disabled (set ENABLE_COVERS=1 to turn on)"

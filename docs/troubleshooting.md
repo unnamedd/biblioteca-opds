@@ -93,26 +93,43 @@ from the template and keeps the Pi reproducible.
 
 ## No cover images in the catalogue
 
-Expected with the default config. `no-thumb` is set because extracting EPUB
-covers costs CPU on a 1 GHz Cortex-A53, and copyparty then emits the cover links
-with an empty `href`:
+Expected with the default config, and it is the `no-thumb` flag rather than a
+missing package: with the thumbnailer off, copyparty still emits the cover links
+but leaves the `href` empty:
 
 ```xml
 <link rel="http://opds-spec.org/image/thumbnail" href="" type="image/jpeg"/>
 ```
 
+Covers need **one** thumbnail backend, not specifically pillow: copyparty
+lists `epub` under both `--th-r-pil` (pillow) and `--th-r-ffi` (ffmpeg). Check
+what you already have before installing anything —
+
+```bash
+command -v ffmpeg && echo "already covered"
+```
+
+— and read copyparty's own verdict in the log:
+
+```bash
+journalctl -u copyparty | grep optional-dependencies
+```
+
+Pi OS Lite ships neither backend; `python3-pil` is much the smaller of the two.
+
 To turn covers on, set `ENABLE_COVERS=1` in `library.env` and re-run
 `scripts/10-system.sh` and `scripts/30-copyparty.sh` — or by hand:
 
 ```bash
-sudo apt install -y python3-pil
+sudo apt install -y python3-pil      # skip if ffmpeg is already present
 sudo sed -i '/^  no-thumb$/d' /etc/copyparty.conf
 sudo systemctl reload copyparty
 ```
 
-The links then become `/books/....epub?dl&th=jf` and the cover is extracted on
-first request. Watch the first browse after enabling it — that is when every
-cover gets generated.
+The links then become `/books/....epub?dl&th=jf`. copyparty unpacks the EPUB and
+thumbnails the cover it finds (`--au-unpk` maps `epub=jpg.epub`); PNG and JPEG
+covers both work. Each result is cached under `hist`, so a book is decoded once,
+not on every view — the first browse after enabling is the slow one.
 
 ## The reader says the password is wrong, then nothing works at all
 

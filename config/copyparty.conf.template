@@ -15,9 +15,12 @@
   # enable the OPDS feed (off by default). Reachable as <volume>/?opds
   opds
 
-  # cover thumbnails. Off by default: extracting EPUB covers costs CPU on a
-  # 1 GHz Cortex-A53 and needs python3-pil. With this on, the OPDS feed still
-  # emits cover links but with an empty href, so the reader shows no covers.
+  # cover thumbnails. While no-thumb is set the OPDS feed still emits cover
+  # links, but with an empty href, so the reader shows no covers.
+  # Turning them on needs one thumbnail backend: copyparty lists epub under
+  # both --th-r-pil (pillow) and --th-r-ffi (ffmpeg), so either will do.
+  # Pi OS Lite ships neither; python3-pil is much the smaller of the two.
+  # Each cover is decoded once and cached under hist, not per request.
   # Set ENABLE_COVERS=1 in library.env to turn them on.
 __THUMB_LINE__
 

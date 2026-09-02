@@ -190,13 +190,15 @@ What each line is for:
 - `p: 80` — so the URL carries no port number.
 - `opds` — the OPDS feed is **off by default**; this turns it on. The feed is
   the volume URL with `?opds` appended.
-- `no-thumb` — no Pillow/ffmpeg work on a 1 GHz Cortex-A53. The OPDS feed
-  still emits cover links, but with an empty `href`, so the reader shows no
-  covers. To get real covers: `sudo apt install python3-pil`, drop the
-  `no-thumb` line, `sudo systemctl reload copyparty` — the links then become
-  `...epub?dl&th=jf` and copyparty extracts the cover on demand. It costs CPU
-  on every first view, which is why it is off by default
-  (`ENABLE_COVERS=1` in `library.env` does this for you).
+- `no-thumb` — disables the thumbnailer. The OPDS feed still emits cover
+  links, but with an empty `href`, so the reader shows no covers. To get real
+  covers you need one backend installed — copyparty lists `epub` under both
+  `--th-r-pil` (pillow) and `--th-r-ffi` (ffmpeg), so either works, and Pi OS
+  Lite ships neither. `python3-pil` is much the smaller. Then drop the
+  `no-thumb` line and `sudo systemctl reload copyparty`; the links become
+  `...epub?dl&th=jf`. Each cover is decoded once and cached under `hist`, so
+  the cost is one decode per book rather than per view
+  (`ENABLE_COVERS=1` in `library.env` does all of this for you).
 - `e2d` — the up2k index, which gives you search and deduplication cheaply.
 - `hist:` — keeps the index out of the books folder itself.
 - `xff-*` / `rproxy: 1` — Tailscale terminates TLS and proxies from localhost,
