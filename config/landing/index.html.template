@@ -1,0 +1,80 @@
+<!doctype html>
+<!--
+  Rendered by scripts/30-copyparty.sh into $LANDING_DIR/index.html and served
+  at "/" to anyone, with no login. Edit THIS file, not the copy on the Pi --
+  the installer overwrites the deployed one on every run so the server stays
+  reproducible from the repo.
+
+  Deliberately self-contained: no fonts, scripts or images are fetched, so the
+  page discloses nothing and works offline.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__LIBRARY_TITLE__</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --fg: #1a1a1a;
+    --muted: #6b6b6b;
+    --bg: #faf9f7;
+    --accent: #6b4423;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg: #e8e6e3; --muted: #8a8580; --bg: #1a1917; --accent: #c8a882; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2rem;
+    padding: 2rem;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.6 ui-serif, Georgia, "Times New Roman", serif;
+    text-align: center;
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(2.5rem, 12vw, 4.5rem);
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+  .enter {
+    display: inline-block;
+    padding: 0.6rem 1.6rem;
+    border: 1px solid var(--accent);
+    border-radius: 2px;
+    color: var(--accent);
+    text-decoration: none;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.95rem;
+    letter-spacing: 0.04em;
+  }
+  .enter:hover, .enter:focus { background: var(--accent); color: var(--bg); }
+  footer {
+    position: fixed;
+    bottom: 1.25rem;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+  footer a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+  footer a:hover { color: var(--fg); }
+</style>
+</head>
+<body>
+  <h1>__LIBRARY_TITLE__</h1>
+  <a class="enter" href="/__BOOKS_ENDPOINT__/">Enter the library</a>
+  <footer>
+    built with <a href="https://github.com/unnamedd/biblioteca-opds">Biblioteca</a>
+    &middot;
+    powered by <a href="https://github.com/9001/copyparty">copyparty</a>
+  </footer>
+</body>
+</html>
