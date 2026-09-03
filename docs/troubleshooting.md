@@ -347,6 +347,30 @@ Work down the chain:
 Funnel keeps working independently, so a Cloudflare outage never locks you
 out — that is why the plan keeps both.
 
+## Browser login says "rejected by cors-check", but only through one tunnel
+
+copyparty's CSRF check compares the browser's `Origin` with the scheme and host
+it believes it is serving. Behind a proxy it derives those from
+`X-Forwarded-Proto` and `Host` — **but only when the proxy's own address is in
+`xff-src`**. From any other peer the forwarded headers are ignored, the request
+looks like plain `http://`, and every browser login fails. Non-browser clients
+send no `Origin`, so the reader and `curl` keep working — which is why OPDS
+works while the login page does not.
+
+The usual cause: the tunnel service is `localhost:80`, `localhost` resolves to
+`::1` as well as `127.0.0.1`, and `xff-src` names only `127.0.0.1`. Confirm in
+the log:
+
+```bash
+sudo journalctl -u copyparty | grep -m1 'untrusted source'
+#  ... untrusted source "::1" claiming the true client ip is "..."
+```
+
+Fix: `xff-src: 127.0.0.0/8, ::1/128` in `/etc/copyparty.conf` (the template's
+current value), then `sudo systemctl reload copyparty`. The same misconfiguration
+also makes `ban-pw` ban the loopback address — everyone through that tunnel at
+once — so this is worth fixing even if you never use the login page.
+
 ## Everyone is banned at the same time
 
 copyparty's `ban-pw` bans by client IP. Behind a tunnel every request reaches

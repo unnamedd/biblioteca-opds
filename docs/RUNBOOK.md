@@ -202,7 +202,7 @@ sudo tee /etc/copyparty.conf >/dev/null <<'EOF'
   html-head: <style>#cc,.agr,#v{display:none!important}</style>
 
   xff-hdr: x-forwarded-for
-  xff-src: 127.0.0.1
+  xff-src: 127.0.0.0/8, ::1/128
   rproxy: -1
 
 [accounts]
@@ -279,7 +279,10 @@ What each line is for:
 - `hist:` — keeps the index out of the books folder itself.
 - `xff-*` / `rproxy: -1` — Funnel and Cloudflare Tunnel both terminate TLS and
   proxy from localhost, setting `X-Forwarded-For`; `xff-src` trusts exactly
-  that hop. `-1` attributes a request to the *rightmost* entry — the one the
+  that hop — and must name **both** loopback families, because cloudflared
+  connects to "localhost", which resolves to `::1` as readily as `127.0.0.1`.
+  A peer outside `xff-src` has its forwarded headers ignored, which breaks
+  browser logins (CSRF check) and makes `ban-pw` key on the loopback address. `-1` attributes a request to the *rightmost* entry — the one the
   nearest proxy appended, i.e. the real client. This matters for `ban-pw`:
   with `1` (leftmost) a client can seed the header and dodge a ban by changing
   the seed, and with a header *name* that does not match what the proxy sends,

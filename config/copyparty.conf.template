@@ -81,8 +81,16 @@ __THUMB_LINE__
   # dodge ban-pw by changing the seed; with a header NAME that does not match
   # what the proxy sends, every request looks like 127.0.0.1 and one wrong
   # password bans everybody. -1 is correct for both tunnels; inert with none.
+  #
+  # xff-src must cover BOTH loopback families. cloudflared reaches copyparty
+  # at "localhost", which on the Pi resolves to ::1 as readily as 127.0.0.1;
+  # tailscaled uses 127.0.0.1. A peer outside xff-src has its forwarded
+  # headers ignored: browser logins then fail the CSRF check ("rejected by
+  # cors-check"), and ban-pw keys on the loopback address - i.e. on everyone
+  # behind that tunnel. Loopback only, so a LAN client forging headers is
+  # still ignored. These two ranges are copyparty's own default.
   xff-hdr: x-forwarded-for
-  xff-src: 127.0.0.1
+  xff-src: 127.0.0.0/8, ::1/128
   rproxy: -1
 
 __BAN_PW_LINE__

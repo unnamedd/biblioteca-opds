@@ -267,6 +267,24 @@ else
   fi
 fi
 
+# (g) both loopback families must be trusted proxies. cloudflared reaches
+# copyparty at "localhost" (which may resolve to ::1), tailscaled at 127.0.0.1.
+# From an untrusted peer copyparty ignores the forwarded headers: browser
+# logins then fail the CSRF check and ban-pw keys on the loopback address.
+for peer in 127.0.0.1 "[::1]"; do
+  out="$(curl -sS --max-time 10 -X POST -d '' \
+          -H "Host: ${SERVER_HOSTNAME}.local" -H "Origin: https://${SERVER_HOSTNAME}.local" \
+          -H 'X-Forwarded-Proto: https' -H 'X-Forwarded-For: 198.51.100.7' \
+          "http://${peer}:${SERVER_PORT}/" 2>/dev/null)"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    check_skip "could not connect to ${peer}:${SERVER_PORT} (IPv6 loopback disabled?)"
+  elif printf '%s' "$out" | grep -q 'cors-check'; then
+    check_fail "forwarded headers from ${peer} are NOT trusted — tunnel logins will fail; fix xff-src"
+  else
+    check_ok "forwarded headers trusted from ${peer}"
+  fi
+done
+
 # ---------------------------------------------------------------------------
 step "6. Tailscale Funnel"
 
