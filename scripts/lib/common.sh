@@ -78,10 +78,10 @@ require_sudo() {
 
 # --- config ------------------------------------------------------------------
 # Defaults; library.env overrides them.
-LIBRARY_ALIAS="${LIBRARY_ALIAS:-biblioteca}"
-COPYPARTY_ACCOUNT="${COPYPARTY_ACCOUNT:-reader}"
-COPYPARTY_PASSWORD="${COPYPARTY_PASSWORD:-}"
-COPYPARTY_PORT="${COPYPARTY_PORT:-80}"
+SERVER_HOSTNAME="${SERVER_HOSTNAME:-biblioteca}"
+MANAGER_ACCOUNT="${MANAGER_ACCOUNT:-reader}"
+MANAGER_PASSWORD="${MANAGER_PASSWORD:-}"
+SERVER_PORT="${SERVER_PORT:-80}"
 BOOKS_DIR="${BOOKS_DIR:-/srv/books}"
 SERVICE_USER="${SERVICE_USER:-copyparty}"
 ENABLE_ZRAM="${ENABLE_ZRAM:-1}"
@@ -90,15 +90,49 @@ ENABLE_COVERS="${ENABLE_COVERS:-0}"
 GUEST_ACCOUNT="${GUEST_ACCOUNT:-}"
 GUEST_PASSWORD="${GUEST_PASSWORD:-}"
 
+# Identity and URL layout. All of this is meant to be changed: two people
+# running this project should not share a URL layout, so that a stock install
+# is not guessable.
+LIBRARY_TITLE="${LIBRARY_TITLE:-Biblioteca}"
+BOOKS_ENDPOINT="${BOOKS_ENDPOINT:-books}"
+MANAGER_ENDPOINT="${MANAGER_ENDPOINT:-manager}"
+LANDING_DIR="${LANDING_DIR:-/srv/landing}"
+# An always-empty directory backing /<MANAGER_ENDPOINT>/. It exists so that
+# door lists its two children (books, wallpapers) instead of 403-ing, and it
+# is mounted read-only so a mistyped upload cannot land in it.
+MANAGER_ROOT_DIR="${MANAGER_ROOT_DIR:-/var/lib/copyparty/manager-root}"
+# the reader itself opens epub/xtc/xtch/txt; the rest are for phones+computers
+BOOKS_EXTS="${BOOKS_EXTS:-epub,xtc,xtch,txt,pdf,md,cbz,cbr,azw3,mobi,fb2}"
+
+# Sleep-screen images, kept out of the book catalogue entirely.
+WALLPAPERS_ENABLED="${WALLPAPERS_ENABLED:-1}"
+WALLPAPERS_ENDPOINT="${WALLPAPERS_ENDPOINT:-wallpapers}"
+WALLPAPERS_DIR="${WALLPAPERS_DIR:-/srv/wallpapers}"
+# bmp and pxc are what the device can actually open; png is stored but not listed
+WALLPAPERS_EXTS="${WALLPAPERS_EXTS:-bmp,pxc}"
+
 load_env() {
   if [ -f "$ENV_FILE" ]; then
+    # library.env is sourced as shell, so an unquoted value containing a space
+    # or an apostrophe is a syntax error (or worse, silently empty). Catch it
+    # here with a message that says what to do.
+    if ! bash -n "$ENV_FILE" 2>/dev/null; then
+      die "$ENV_FILE has a syntax error. Values with spaces or apostrophes must be quoted, e.g. LIBRARY_TITLE=\"Your Name's Shelf\""
+    fi
+    # bash -n accepts KEY=two words as valid syntax (it parses as an env-prefixed
+    # command), so the value silently vanishes. Catch unquoted spaces explicitly.
+    _bad="$(grep -nE '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=[^"'"'"'][^#]*[[:space:]][^#]*$' "$ENV_FILE" 2>/dev/null || true)"
+    if [ -n "$_bad" ]; then
+      printf '%s\n' "$_bad" | sed 's/^/    /' >&2
+      die "$ENV_FILE: the value(s) above contain spaces but are not quoted; write LIBRARY_TITLE=\"Your Name's Shelf\""
+    fi
     # shellcheck disable=SC1090
     set -a; . "$ENV_FILE"; set +a
   fi
   # re-apply defaults for anything the env file left empty
-  LIBRARY_ALIAS="${LIBRARY_ALIAS:-biblioteca}"
-  COPYPARTY_ACCOUNT="${COPYPARTY_ACCOUNT:-reader}"
-  COPYPARTY_PORT="${COPYPARTY_PORT:-80}"
+  SERVER_HOSTNAME="${SERVER_HOSTNAME:-biblioteca}"
+  MANAGER_ACCOUNT="${MANAGER_ACCOUNT:-reader}"
+  SERVER_PORT="${SERVER_PORT:-80}"
   BOOKS_DIR="${BOOKS_DIR:-/srv/books}"
   SERVICE_USER="${SERVICE_USER:-copyparty}"
   ENABLE_ZRAM="${ENABLE_ZRAM:-1}"
@@ -106,6 +140,30 @@ load_env() {
   GUEST_ACCOUNT="${GUEST_ACCOUNT:-}"
   GUEST_PASSWORD="${GUEST_PASSWORD:-}"
   BAN_PW="${BAN_PW:-1}"
+  LIBRARY_TITLE="${LIBRARY_TITLE:-Biblioteca}"
+  BOOKS_ENDPOINT="${BOOKS_ENDPOINT:-books}"
+  MANAGER_ENDPOINT="${MANAGER_ENDPOINT:-manager}"
+  LANDING_DIR="${LANDING_DIR:-/srv/landing}"
+  MANAGER_ROOT_DIR="${MANAGER_ROOT_DIR:-/var/lib/copyparty/manager-root}"
+  BOOKS_EXTS="${BOOKS_EXTS:-epub,xtc,xtch,txt,pdf,md,cbz,cbr,azw3,mobi,fb2}"
+  WALLPAPERS_ENABLED="${WALLPAPERS_ENABLED:-1}"
+  WALLPAPERS_ENDPOINT="${WALLPAPERS_ENDPOINT:-wallpapers}"
+  WALLPAPERS_DIR="${WALLPAPERS_DIR:-/srv/wallpapers}"
+  WALLPAPERS_EXTS="${WALLPAPERS_EXTS:-bmp,pxc}"
+  WALLPAPERS_ENDPOINT="$(trim_path "$WALLPAPERS_ENDPOINT")"
+  # tolerate "/books", "books/" or "/books/" in library.env
+  BOOKS_ENDPOINT="$(trim_path "$BOOKS_ENDPOINT")"
+  MANAGER_ENDPOINT="$(trim_path "$MANAGER_ENDPOINT")"
+  [ -n "$BOOKS_ENDPOINT" ]   || die "BOOKS_ENDPOINT must not be empty"
+  [ -n "$MANAGER_ENDPOINT" ] || die "MANAGER_ENDPOINT must not be empty"
+  [ "$BOOKS_ENDPOINT" != "$MANAGER_ENDPOINT" ] || die "BOOKS_ENDPOINT and MANAGER_ENDPOINT must differ"
+  [ -n "$LIBRARY_TITLE" ] || die "LIBRARY_TITLE is empty — if it contains spaces, quote it: LIBRARY_TITLE=\"My Library\""
+  if [ "$WALLPAPERS_ENABLED" = "1" ]; then
+    [ -n "$WALLPAPERS_ENDPOINT" ] || die "WALLPAPERS_ENDPOINT must not be empty"
+    for _e in "$BOOKS_ENDPOINT" "$MANAGER_ENDPOINT"; do
+      [ "$WALLPAPERS_ENDPOINT" != "$_e" ] || die "WALLPAPERS_ENDPOINT must differ from $_e"
+    done
+  fi
 }
 
 # Persist a key=value into library.env (creating it, 0600).
@@ -120,10 +178,10 @@ save_env() {
     # portable in-place edit (no GNU sed -i assumptions)
     local tmp; tmp="$(mktemp)"
     grep -vE "^${key}=" "$ENV_FILE" > "$tmp"
-    printf '%s=%s\n' "$key" "$val" >> "$tmp"
+    printf '%s=\"%s\"\n' "$key" "$val" >> "$tmp"
     cat "$tmp" > "$ENV_FILE"; rm -f "$tmp"
   else
-    printf '%s=%s\n' "$key" "$val" >> "$ENV_FILE"
+    printf '%s=\"%s\"\n' "$key" "$val" >> "$ENV_FILE"
   fi
   chmod 600 "$ENV_FILE"
 }
@@ -147,12 +205,24 @@ primary_ipv4() {
 
 # The base URL a LAN client uses, honouring a non-default port.
 lan_url() {
-  if [ "$COPYPARTY_PORT" = "80" ]; then
-    printf 'http://%s.local' "$LIBRARY_ALIAS"
+  if [ "$SERVER_PORT" = "80" ]; then
+    printf 'http://%s.local' "$SERVER_HOSTNAME"
   else
-    printf 'http://%s.local:%s' "$LIBRARY_ALIAS" "$COPYPARTY_PORT"
+    printf 'http://%s.local:%s' "$SERVER_HOSTNAME" "$SERVER_PORT"
   fi
 }
+
+# strip surrounding slashes so "/books/", "books/" and "books" all work
+trim_path() { printf '%s' "$1" | sed -e 's|^/*||' -e 's|/*$||'; }
+
+# The three doors, as URLs a human can paste.
+books_url()    { printf '%s/%s/' "$(lan_url)" "$BOOKS_ENDPOINT"; }
+opds_url()     { printf '%s/%s/?opds' "$(lan_url)" "$BOOKS_ENDPOINT"; }
+manager_url()       { printf '%s/%s/' "$(lan_url)" "$MANAGER_ENDPOINT"; }
+manager_books_url() { printf '%s/%s/books/' "$(lan_url)" "$MANAGER_ENDPOINT"; }
+wallpapers_url()      { printf '%s/%s/' "$(lan_url)" "$WALLPAPERS_ENDPOINT"; }
+wallpapers_opds_url() { printf '%s/%s/?opds' "$(lan_url)" "$WALLPAPERS_ENDPOINT"; }
+wallpapers_mgr_url()  { printf '%s/%s/wallpapers/' "$(lan_url)" "$MANAGER_ENDPOINT"; }
 
 tailnet_hostname() {
   have tailscale || return 1

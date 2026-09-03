@@ -57,16 +57,16 @@ a = string.ascii_letters + string.digits
 print("".join(secrets.choice(a) for _ in range(24)))'
 }
 
-if [ -n "${GUEST_ACCOUNT:-}" ] && [ "$GUEST_ACCOUNT" = "$COPYPARTY_ACCOUNT" ]; then
-  die "GUEST_ACCOUNT and COPYPARTY_ACCOUNT are both '$GUEST_ACCOUNT'; they must differ"
+if [ -n "${GUEST_ACCOUNT:-}" ] && [ "$GUEST_ACCOUNT" = "$MANAGER_ACCOUNT" ]; then
+  die "GUEST_ACCOUNT and MANAGER_ACCOUNT are both '$GUEST_ACCOUNT'; they must differ"
 fi
 
 GENERATED=0
-if [ -z "${COPYPARTY_PASSWORD:-}" ]; then
+if [ -z "${MANAGER_PASSWORD:-}" ]; then
   if [ "$DRY_RUN" = "1" ]; then
-    COPYPARTY_PASSWORD="<generated-at-run-time>"
+    MANAGER_PASSWORD="<generated-at-run-time>"
   else
-    COPYPARTY_PASSWORD="$(gen_password)"; GENERATED=1
+    MANAGER_PASSWORD="$(gen_password)"; GENERATED=1
   fi
 fi
 
@@ -79,7 +79,7 @@ if [ -n "${GUEST_ACCOUNT:-}" ] && [ -z "${GUEST_PASSWORD:-}" ]; then
   fi
 fi
 
-for _pw in "$COPYPARTY_PASSWORD" "${GUEST_PASSWORD:-}"; do
+for _pw in "$MANAGER_PASSWORD" "${GUEST_PASSWORD:-}"; do
   case "$_pw" in
     "") ;;
     *[![:alnum:]]*)
@@ -91,20 +91,98 @@ done
 # --- config ------------------------------------------------------------------
 step "Configuration"
 
-ACCOUNTS_LINES="  ${COPYPARTY_ACCOUNT}: ${COPYPARTY_PASSWORD}"
-ACCS_LINES="    rwmd: ${COPYPARTY_ACCOUNT}"
+ACCOUNTS_LINES="  ${MANAGER_ACCOUNT}: ${MANAGER_PASSWORD}"
+
+# The reading door is read-only for EVERYONE -- you included. Browsing it,
+# your account reports perms ["read","get"], exactly what a guest sees, so
+# copyparty renders the same stripped-down UI. Management lives behind
+# MANAGER_ENDPOINT. Same folder on disk either way; nothing is duplicated.
+BOOKS_ACCS="    r: ${MANAGER_ACCOUNT}"
 
 if [ -n "${GUEST_ACCOUNT:-}" ]; then
   ACCOUNTS_LINES="${ACCOUNTS_LINES}
   ${GUEST_ACCOUNT}: ${GUEST_PASSWORD}"
   # "r" is list + download: enough for the web UI and for OPDS, and it grants
   # no upload, rename or delete
-  ACCS_LINES="    r: ${GUEST_ACCOUNT}
-${ACCS_LINES}"
-  info "accounts: ${COPYPARTY_ACCOUNT} (full) + ${GUEST_ACCOUNT} (read-only)"
+  BOOKS_ACCS="    r: ${GUEST_ACCOUNT}
+${BOOKS_ACCS}"
+  info "accounts: ${MANAGER_ACCOUNT} (full) + ${GUEST_ACCOUNT} (read-only)"
 else
-  info "accounts: ${COPYPARTY_ACCOUNT} only (set GUEST_ACCOUNT to add a read-only one)"
+  info "accounts: ${MANAGER_ACCOUNT} only (set GUEST_ACCOUNT to add a read-only one)"
 fi
+
+VOLUMES="[/]
+  ${LANDING_DIR}
+  accs:
+    # h = serve index.html to anyone; the folder itself stays unlistable.
+    # Deliberately NOT writable by anyone: this volume catches every URL that
+    # matches no other door, so a mistyped upload path would otherwise land a
+    # file in a folder that is served publicly. The installer writes
+    # index.html straight to disk, so nothing needs HTTP write here.
+    h: *
+  flags:
+    hist: /var/lib/copyparty/hist/landing
+
+[/${BOOKS_ENDPOINT}]
+  ${BOOKS_DIR}
+  accs:
+${BOOKS_ACCS}
+  flags:
+    opds
+    opds_exts: ${BOOKS_EXTS}
+    hist: /var/lib/copyparty/hist/books
+
+[/${MANAGER_ENDPOINT}]
+  ${MANAGER_ROOT_DIR}
+  accs:
+    # Listing only, over an always-empty directory: this door exists so that
+    # /${MANAGER_ENDPOINT}/ shows its children instead of 403-ing. Read-only,
+    # so a mistyped upload cannot land here instead of in books/ or
+    # wallpapers/.
+    r: ${MANAGER_ACCOUNT}
+  flags:
+    hist: /var/lib/copyparty/hist/manager-root
+
+[/${MANAGER_ENDPOINT}/books]
+  ${BOOKS_DIR}
+  accs:
+    # r=read w=upload m=move/rename d=delete
+    rwmd: ${MANAGER_ACCOUNT}
+  flags:
+    hist: /var/lib/copyparty/hist/manager-books"
+
+DOORS="/ (landing) - /${BOOKS_ENDPOINT} (reading) - /${MANAGER_ENDPOINT} (management)"
+
+if [ "$WALLPAPERS_ENABLED" = "1" ]; then
+  # Sleep-screen images get their own directory and their own format list, so
+  # they never reach the book catalogue. The writable mount sits under the
+  # manager door, keeping one place to administer everything.
+  WALL_ACCS="    r: ${MANAGER_ACCOUNT}"
+  [ -n "${GUEST_ACCOUNT:-}" ] && WALL_ACCS="    r: ${GUEST_ACCOUNT}
+${WALL_ACCS}"
+  VOLUMES="${VOLUMES}
+
+[/${WALLPAPERS_ENDPOINT}]
+  ${WALLPAPERS_DIR}
+  accs:
+${WALL_ACCS}
+  flags:
+    opds
+    opds_exts: ${WALLPAPERS_EXTS}
+    hist: /var/lib/copyparty/hist/wallpapers
+
+[/${MANAGER_ENDPOINT}/wallpapers]
+  ${WALLPAPERS_DIR}
+  accs:
+    rwmd: ${MANAGER_ACCOUNT}
+  flags:
+    hist: /var/lib/copyparty/hist/manager-wallpapers"
+  DOORS="${DOORS} - /${WALLPAPERS_ENDPOINT} (wallpapers)"
+else
+  info "wallpapers: disabled (WALLPAPERS_ENABLED=0)"
+fi
+
+info "doors: ${DOORS}"
 
 if [ "$ENABLE_COVERS" = "1" ]; then
   THUMB_LINE="  # covers on (ENABLE_COVERS=1); needs pillow or ffmpeg"
@@ -128,25 +206,27 @@ if [ "$DRY_RUN" = "1" ]; then
 else
   TMP_CONF="$(mktemp)"
   trap 'rm -f "$TMP_CONF"' EXIT
-  COPYPARTY_PASSWORD="$COPYPARTY_PASSWORD" \
-  COPYPARTY_ACCOUNT="$COPYPARTY_ACCOUNT" \
-  COPYPARTY_PORT="$COPYPARTY_PORT" \
+  MANAGER_PASSWORD="$MANAGER_PASSWORD" \
+  MANAGER_ACCOUNT="$MANAGER_ACCOUNT" \
+  SERVER_PORT="$SERVER_PORT" \
   BOOKS_DIR="$BOOKS_DIR" \
   BAN_PW_LINE="$BAN_PW_LINE" \
   THUMB_LINE="$THUMB_LINE" \
-  ACCS_LINES="$ACCS_LINES" \
   ACCOUNTS_LINES="$ACCOUNTS_LINES" \
+  VOLUMES="$VOLUMES" \
+  LIBRARY_TITLE="$LIBRARY_TITLE" \
   python3 - "$CONFIG_DIR/copyparty.conf.template" "$TMP_CONF" <<'PY'
 import os, re, sys
 src, dst = sys.argv[1], sys.argv[2]
 text = open(src).read()
 for key, env in (
-    ("__PORT__",           "COPYPARTY_PORT"),
+    ("__PORT__",           "SERVER_PORT"),
     ("__BOOKS_DIR__",      "BOOKS_DIR"),
     ("__BAN_PW_LINE__",    "BAN_PW_LINE"),
     ("__THUMB_LINE__",     "THUMB_LINE"),
     ("__ACCOUNTS_LINES__", "ACCOUNTS_LINES"),
-    ("__ACCS_LINES__",     "ACCS_LINES"),
+    ("__LIBRARY_TITLE__",  "LIBRARY_TITLE"),
+    ("__VOLUMES__",        "VOLUMES"),
 ):
     text = text.replace(key, os.environ[env])
 # an empty placeholder leaves a run of blank lines behind; tidy it up
@@ -155,6 +235,31 @@ open(dst, "w").write(text)
 PY
   $SUDO install -m 0640 -o root -g "$SERVICE_USER" "$TMP_CONF" /etc/copyparty.conf
   ok "wrote /etc/copyparty.conf (0640 root:$SERVICE_USER)"
+fi
+
+# --- landing page ------------------------------------------------------------
+step "Landing page"
+
+if [ "$DRY_RUN" = "1" ]; then
+  info "[dry-run] would render $LANDING_DIR/index.html"
+else
+  TMP_HTML="$(mktemp)"
+  LIBRARY_TITLE="$LIBRARY_TITLE" BOOKS_ENDPOINT="$BOOKS_ENDPOINT" \
+  python3 - "$CONFIG_DIR/landing/index.html.template" "$TMP_HTML" <<'HTMLPY'
+import html, os, sys
+src, dst = sys.argv[1], sys.argv[2]
+text = open(src).read()
+# escape: these land inside HTML, and a title containing & or < would break it
+for key, env in (("__LIBRARY_TITLE__",  "LIBRARY_TITLE"),
+                 ("__BOOKS_ENDPOINT__", "BOOKS_ENDPOINT")):
+    text = text.replace(key, html.escape(os.environ[env], quote=True))
+open(dst, "w").write(text)
+HTMLPY
+  $SUDO install -m 0644 -o "$SERVICE_USER" -g "$SERVICE_USER" "$TMP_HTML" "$LANDING_DIR/index.html"
+  rm -f "$TMP_HTML"
+  ok "wrote $LANDING_DIR/index.html (title: $LIBRARY_TITLE)"
+  hint "customise config/landing/index.html.template, not the copy on the Pi --"
+  hint "it is overwritten on every run so the server stays reproducible"
 fi
 
 # --- unit --------------------------------------------------------------------
@@ -181,7 +286,7 @@ run $SUDO systemctl restart copyparty
 if [ "$DRY_RUN" != "1" ]; then
   sleep 3
   if unit_active copyparty; then
-    ok "copyparty is active on port ${COPYPARTY_PORT}"
+    ok "copyparty is active on port ${SERVER_PORT}"
   else
     $SUDO journalctl -u copyparty -n 30 --no-pager | sed 's/^/    /' || true
     die "copyparty failed to start"
@@ -200,11 +305,11 @@ if [ "$GUEST_GENERATED" = "1" ]; then
 fi
 
 if [ "$GENERATED" = "1" ]; then
-  save_env COPYPARTY_PASSWORD "$COPYPARTY_PASSWORD"
+  save_env MANAGER_PASSWORD "$MANAGER_PASSWORD"
   echo
   printf '%s┌─ generated password (saved to library.env) ─────────────%s\n' "$C_YEL" "$C_RESET"
-  printf '%s│%s  user: %s\n' "$C_YEL" "$C_RESET" "$COPYPARTY_ACCOUNT"
-  printf '%s│%s  pass: %s%s%s\n' "$C_YEL" "$C_RESET" "$C_BOLD" "$COPYPARTY_PASSWORD" "$C_RESET"
+  printf '%s│%s  user: %s\n' "$C_YEL" "$C_RESET" "$MANAGER_ACCOUNT"
+  printf '%s│%s  pass: %s%s%s\n' "$C_YEL" "$C_RESET" "$C_BOLD" "$MANAGER_PASSWORD" "$C_RESET"
   printf '%s└────────────────────────────────────────────────────────%s\n' "$C_YEL" "$C_RESET"
 fi
 

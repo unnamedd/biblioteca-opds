@@ -97,23 +97,23 @@ fi
 
 # --- listen port -------------------------------------------------------------
 if have ss; then
-  PORT_LINE="$($SUDO ss -ltnpH "sport = :${COPYPARTY_PORT}" 2>/dev/null | head -1 || true)"
+  PORT_LINE="$($SUDO ss -ltnpH "sport = :${SERVER_PORT}" 2>/dev/null | head -1 || true)"
   if [ -z "$PORT_LINE" ]; then
-    ok "port ${COPYPARTY_PORT}: free"
+    ok "port ${SERVER_PORT}: free"
   elif printf '%s' "$PORT_LINE" | grep -q 'copyparty\|python3'; then
-    ok "port ${COPYPARTY_PORT}: already held by copyparty (re-run is fine)"
+    ok "port ${SERVER_PORT}: already held by copyparty (re-run is fine)"
   else
-    fail "port ${COPYPARTY_PORT} is in use by something else:"
+    fail "port ${SERVER_PORT} is in use by something else:"
     printf '        %s\n' "$PORT_LINE" >&2
-    hint "either stop it, or set COPYPARTY_PORT=3923 in library.env"
+    hint "either stop it, or set SERVER_PORT=3923 in library.env"
   fi
 else
-  warn "ss not found - cannot check whether port ${COPYPARTY_PORT} is free"
+  warn "ss not found - cannot check whether port ${SERVER_PORT} is free"
 fi
 
 # --- avahi -------------------------------------------------------------------
 if unit_active avahi-daemon; then
-  ok "avahi-daemon: running (needed for ${LIBRARY_ALIAS}.local)"
+  ok "avahi-daemon: running (needed for ${SERVER_HOSTNAME}.local)"
 elif have systemctl; then
   warn "avahi-daemon not running; 10-system.sh will install avahi-utils but the"
   warn "daemon itself must be present for the .local name to work"

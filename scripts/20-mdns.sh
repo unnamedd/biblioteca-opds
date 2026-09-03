@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 20-mdns.sh -- publish <LIBRARY_ALIAS>.local beside the Pi's real hostname.
+# 20-mdns.sh -- publish <SERVER_HOSTNAME>.local beside the Pi's real hostname.
 #
 # This adds a second mDNS A record; it does NOT rename the machine. The
 # wrapper resolves the current primary IPv4 at start, so a reboot onto a new
@@ -11,7 +11,7 @@ print_usage() { cat <<'USAGE'
 usage: 20-mdns.sh [--dry-run]
 
 Installs /usr/local/lib/avahi-alias.sh and avahi-alias@.service, then enables
-avahi-alias@$LIBRARY_ALIAS so http://$LIBRARY_ALIAS.local resolves on the LAN.
+avahi-alias@$SERVER_HOSTNAME so http://$SERVER_HOSTNAME.local resolves on the LAN.
 USAGE
 }
 
@@ -19,9 +19,9 @@ parse_common_flags "$@"
 load_env
 require_sudo
 
-UNIT="avahi-alias@${LIBRARY_ALIAS}.service"
+UNIT="avahi-alias@${SERVER_HOSTNAME}.service"
 
-step "mDNS alias: ${LIBRARY_ALIAS}.local"
+step "mDNS alias: ${SERVER_HOSTNAME}.local"
 
 have avahi-publish || die "avahi-publish not found - run 10-system.sh first"
 
@@ -63,14 +63,14 @@ if [ "$DRY_RUN" != "1" ]; then
     die "$UNIT failed to start"
   fi
 
-  if getent hosts "${LIBRARY_ALIAS}.local" >/dev/null 2>&1; then
-    ok "resolves locally: $(getent hosts "${LIBRARY_ALIAS}.local" | head -1)"
+  if getent hosts "${SERVER_HOSTNAME}.local" >/dev/null 2>&1; then
+    ok "resolves locally: $(getent hosts "${SERVER_HOSTNAME}.local" | head -1)"
   else
-    warn "${LIBRARY_ALIAS}.local does not resolve on the Pi itself yet"
+    warn "${SERVER_HOSTNAME}.local does not resolve on the Pi itself yet"
     hint "this is often just propagation; 50-verify.sh retries"
   fi
 fi
 
 echo
 printf '%s==> mDNS alias published: %s.local -> %s%s\n' \
-  "$C_GRN" "$LIBRARY_ALIAS" "$(primary_ipv4 || echo '?')" "$C_RESET"
+  "$C_GRN" "$SERVER_HOSTNAME" "$(primary_ipv4 || echo '?')" "$C_RESET"

@@ -28,7 +28,7 @@ load_env
 require_sudo
 
 if [ "$ASSUME_YES" = "0" ] && [ "$DRY_RUN" = "0" ]; then
-  printf 'This removes copyparty, the %s.local alias and the funnel.\n' "$LIBRARY_ALIAS"
+  printf 'This removes copyparty, the %s.local alias and the funnel.\n' "$SERVER_HOSTNAME"
   [ "$PURGE_BOOKS" = "1" ] && printf '%sIt will also DELETE %s%s\n' "$C_RED" "$BOOKS_DIR" "$C_RESET"
   printf 'Continue? [y/N] '
   read -r reply
@@ -49,7 +49,7 @@ run $SUDO rm -f /etc/systemd/system/copyparty.service /etc/copyparty.conf /usr/l
 ok "removed service, config and binary"
 
 step "mDNS alias"
-run $SUDO systemctl disable --now "avahi-alias@${LIBRARY_ALIAS}.service" 2>/dev/null || true
+run $SUDO systemctl disable --now "avahi-alias@${SERVER_HOSTNAME}.service" 2>/dev/null || true
 run $SUDO rm -f /etc/systemd/system/avahi-alias@.service /usr/local/lib/avahi-alias.sh
 ok "removed alias unit and wrapper"
 
@@ -63,7 +63,17 @@ else
   info "kept $BOOKS_DIR"
 fi
 run $SUDO rm -rf /var/lib/copyparty
-ok "removed /var/lib/copyparty (index + thumbs)"
+ok "removed /var/lib/copyparty (indexes + thumbs for all three volumes)"
+if [ -d "$LANDING_DIR" ]; then
+  run $SUDO rm -rf "$LANDING_DIR"
+  ok "removed $LANDING_DIR (the landing page)"
+fi
+if [ "$PURGE_BOOKS" = "1" ] && [ -d "$WALLPAPERS_DIR" ]; then
+  run $SUDO rm -rf "$WALLPAPERS_DIR"
+  ok "deleted $WALLPAPERS_DIR"
+elif [ -d "$WALLPAPERS_DIR" ]; then
+  info "kept $WALLPAPERS_DIR"
+fi
 
 step "Service user"
 if id -u "$SERVICE_USER" >/dev/null 2>&1; then

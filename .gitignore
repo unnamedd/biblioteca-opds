@@ -1,5 +1,11 @@
-# Holds the copyparty password - never commit.
+# Holds your passwords - never commit.
+# Three patterns because backups take different shapes: library.env.bak
+# keeps the suffix, library.old.env puts the marker in the middle. The bare
+# "library.env" rule missed both.
 library.env
+library.env.*
+library.*.env
+!library.env.example
 
 # macOS
 .DS_Store

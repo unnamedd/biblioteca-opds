@@ -66,7 +66,16 @@ fi
 
 # --- directories -------------------------------------------------------------
 step "Directories"
-for d in /var/lib/copyparty /var/lib/copyparty/hist "$BOOKS_DIR"; do
+# one hist per volume: copyparty refuses to start if two volumes share a
+# histpath, and the books folder is mounted twice (reading + management)
+for d in /var/lib/copyparty \
+         /var/lib/copyparty/hist/landing \
+         /var/lib/copyparty/hist/books \
+         /var/lib/copyparty/hist/manager-root \
+         /var/lib/copyparty/hist/manager-books \
+         /var/lib/copyparty/hist/manager-wallpapers \
+         /var/lib/copyparty/hist/wallpapers \
+         "$MANAGER_ROOT_DIR" "$LANDING_DIR" "$BOOKS_DIR" "$WALLPAPERS_DIR"; do
   if [ -d "$d" ]; then
     ok "exists: $d"
   else
@@ -74,9 +83,9 @@ for d in /var/lib/copyparty /var/lib/copyparty/hist "$BOOKS_DIR"; do
     ok "created: $d"
   fi
 done
-run $SUDO chown -R "$SERVICE_USER:$SERVICE_USER" /var/lib/copyparty "$BOOKS_DIR"
+run $SUDO chown -R "$SERVICE_USER:$SERVICE_USER" /var/lib/copyparty "$BOOKS_DIR" "$LANDING_DIR" "$WALLPAPERS_DIR"
 # you will drop books in here over ssh/scp too, so make it group-traversable
-run $SUDO chmod 0755 "$BOOKS_DIR"
+run $SUDO chmod 0755 "$BOOKS_DIR" "$LANDING_DIR" "$WALLPAPERS_DIR"
 ok "ownership set to $SERVICE_USER"
 
 echo

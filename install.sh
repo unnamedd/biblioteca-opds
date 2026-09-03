@@ -47,9 +47,9 @@ DRY_FLAG=()
 printf '\n%s╔══════════════════════════════════════════════════════════╗%s\n' "$C_BOLD" "$C_RESET"
 printf '%s║  Biblioteca installer                                    ║%s\n' "$C_BOLD" "$C_RESET"
 printf '%s╚══════════════════════════════════════════════════════════╝%s\n' "$C_BOLD" "$C_RESET"
-info "alias   : ${LIBRARY_ALIAS}.local"
-info "account : ${COPYPARTY_ACCOUNT}"
-info "port    : ${COPYPARTY_PORT}"
+info "alias   : ${SERVER_HOSTNAME}.local"
+info "account : ${MANAGER_ACCOUNT}"
+info "port    : ${SERVER_PORT}"
 info "books   : ${BOOKS_DIR}"
 [ "$DRY_RUN" = "1" ] && warn "DRY RUN - nothing will be changed"
 

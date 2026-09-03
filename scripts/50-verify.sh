@@ -31,18 +31,23 @@ check_fail() { warn "$*"; FAIL=$((FAIL+1)); }
 check_skip() { hint "skipped: $*"; SKIP=$((SKIP+1)); }
 
 LAN="$(lan_url)"
-BOOKS_URL="${LAN}/books/"
-OPDS_URL="${LAN}/books/?opds"
+BOOKS_URL="$(books_url)"
+OPDS_URL="$(opds_url)"
+MANAGER_URL="$(manager_url)"
+MANAGER_BOOKS_URL="$(manager_books_url)"
+WALLPAPERS_URL="$(wallpapers_url)"
+WALLPAPERS_OPDS_URL="$(wallpapers_opds_url)"
+WALLPAPERS_MGR_URL="$(wallpapers_mgr_url)"
 
 # ---------------------------------------------------------------------------
 step "1. services are running"
 
-for u in copyparty avahi-daemon "avahi-alias@${LIBRARY_ALIAS}.service"; do
+for u in copyparty avahi-daemon "avahi-alias@${SERVER_HOSTNAME}.service"; do
   if unit_active "$u"; then check_ok "$u active"; else check_fail "$u NOT active"; fi
 done
 if unit_active tailscaled; then check_ok "tailscaled active"; else check_fail "tailscaled NOT active"; fi
 
-for u in copyparty "avahi-alias@${LIBRARY_ALIAS}.service"; do
+for u in copyparty "avahi-alias@${SERVER_HOSTNAME}.service"; do
   if unit_enabled "$u"; then
     check_ok "$u enabled at boot"
   else
@@ -81,22 +86,22 @@ fi
 # ---------------------------------------------------------------------------
 step "3. mDNS name resolves"
 
-if getent hosts "${LIBRARY_ALIAS}.local" >/dev/null 2>&1; then
-  check_ok "${LIBRARY_ALIAS}.local -> $(getent hosts "${LIBRARY_ALIAS}.local" | awk '{print $1}' | head -1)"
+if getent hosts "${SERVER_HOSTNAME}.local" >/dev/null 2>&1; then
+  check_ok "${SERVER_HOSTNAME}.local -> $(getent hosts "${SERVER_HOSTNAME}.local" | awk '{print $1}' | head -1)"
 else
-  check_fail "${LIBRARY_ALIAS}.local does not resolve on the Pi"
+  check_fail "${SERVER_HOSTNAME}.local does not resolve on the Pi"
 fi
-hint "from the Mac:  dns-sd -G v4 ${LIBRARY_ALIAS}.local     (ctrl-C to stop)"
+hint "from the Mac:  dns-sd -G v4 ${SERVER_HOSTNAME}.local     (ctrl-C to stop)"
 hint "the reader resolves .local too - lwIP does one-shot mDNS queries -"
 hint "but that is the one link only step 8 can actually prove."
 
 # ---------------------------------------------------------------------------
 step "4. OPDS feed is served"
 
-if [ -z "${COPYPARTY_PASSWORD:-}" ]; then
-  check_skip "no COPYPARTY_PASSWORD in library.env - cannot test authenticated fetch"
+if [ -z "${MANAGER_PASSWORD:-}" ]; then
+  check_skip "no MANAGER_PASSWORD in library.env - cannot test authenticated fetch"
 else
-  BODY="$(curl -sS --max-time 20 -u "${COPYPARTY_ACCOUNT}:${COPYPARTY_PASSWORD}" "$OPDS_URL" 2>/dev/null || true)"
+  BODY="$(curl -sS --max-time 20 -u "${MANAGER_ACCOUNT}:${MANAGER_PASSWORD}" "$OPDS_URL" 2>/dev/null || true)"
   if printf '%s' "$BODY" | grep -qi '<feed'; then
     check_ok "authenticated GET $OPDS_URL returns an Atom feed"
     N="$(printf '%s' "$BODY" | grep -ci '<entry' || true)"
@@ -111,7 +116,7 @@ else
              | grep -A2 'rel="subsection"' | grep -o 'href="[^"]*"' \
              | head -1 | sed 's/href="//; s/"$//' \
              | python3 -c 'import html,sys; print(html.unescape(sys.stdin.read().strip()))')"
-      if [ -n "$SUB" ] && curl -sS --max-time 20 -u "${COPYPARTY_ACCOUNT}:${COPYPARTY_PASSWORD}" \
+      if [ -n "$SUB" ] && curl -sS --max-time 20 -u "${MANAGER_ACCOUNT}:${MANAGER_PASSWORD}" \
            "${LAN}${SUB}" 2>/dev/null | grep -qi 'application/epub+zip'; then
         check_ok "epub links found in subfeed ${SUB}"
       else
@@ -127,51 +132,129 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-step "5. access control"
+step "5. the three doors"
 
-# (a) nobody gets in without credentials
-CODE="$(curl -sS --max-time 20 -o /tmp/xl-anon.$$ -w '%{http_code}' "$OPDS_URL" 2>/dev/null || echo 000)"
-ANON="$(cat /tmp/xl-anon.$$ 2>/dev/null || true)"; rm -f /tmp/xl-anon.$$
-if printf '%s' "$ANON" | grep -qi '<feed'; then
-  check_fail "anonymous request returned a feed (http $CODE) - the library is public!"
+code() { curl -sS --max-time 20 -o /dev/null -w '%{http_code}' "$@" 2>/dev/null || echo 000; }
+body() { curl -sS --max-time 20 "$@" 2>/dev/null || true; }
+
+want() { # want <expected> <actual> <description>
+  if [ "$2" = "$1" ]; then check_ok "$3 (http $2)"; else check_fail "$3 — expected $1, got $2"; fi
+}
+
+# (a) the landing page is public, the library is not
+want 200 "$(code "${LAN}/")"        "anyone can see the landing page"
+want 403 "$(code "$OPDS_URL")"      "a stranger cannot reach the library"
+want 403 "$(code "$MANAGER_URL")"   "a stranger cannot reach the manager"
+
+if body "${LAN}/" | grep -qi "<h1>"; then
+  check_ok "landing page renders (title: ${LIBRARY_TITLE})"
 else
-  check_ok "anonymous request does not expose the catalogue (http $CODE)"
+  check_fail "landing page did not render an <h1> — is ${LANDING_DIR}/index.html present?"
 fi
 
-# (b) the read-only account, if you configured one
-if [ -z "${GUEST_ACCOUNT:-}" ]; then
-  check_skip "no GUEST_ACCOUNT configured"
-elif [ -z "${GUEST_PASSWORD:-}" ]; then
-  check_skip "GUEST_ACCOUNT set but no GUEST_PASSWORD in library.env"
+# (b) the reading door is read-only for EVERYONE, owner included
+PROBE_R="${LAN}/${BOOKS_ENDPOINT}/.biblioteca-write-probe"
+OWNER="${MANAGER_ACCOUNT}:${MANAGER_PASSWORD}"
+
+want 200 "$(code -u "$OWNER" "$OPDS_URL")" "you can read the library"
+for m in DELETE MOVE; do
+  hdr=(); [ "$m" = "MOVE" ] && hdr=(-H "Destination: ${PROBE_R}-2")
+  c="$(code -u "$OWNER" -X "$m" "${hdr[@]}" "$PROBE_R")"
+  case "$c" in
+    401|403) check_ok "even you cannot $m through /${BOOKS_ENDPOINT} (http $c)" ;;
+    *)       check_fail "$m through /${BOOKS_ENDPOINT} returned http $c — the reading door is not read-only" ;;
+  esac
+done
+
+# the claim the whole split rests on: same account, weaker perms on this door
+if body -u "$OWNER" -H 'User-Agent: Mozilla/5.0' "$BOOKS_URL" | grep -q '"perms": \["read", "get"\]'; then
+  check_ok "your reading view reports perms [read, get] — same UI your guests get"
 else
+  check_fail "your reading view did not report the read-only perms"
+fi
+
+# (c) the manager door: yours alone, and a container rather than a dumping ground
+want 200 "$(code -u "$OWNER" "$MANAGER_URL")"       "you can reach /${MANAGER_ENDPOINT}"
+want 200 "$(code -u "$OWNER" "$MANAGER_BOOKS_URL")" "...and /${MANAGER_ENDPOINT}/books"
+
+# the container itself must not accept uploads, or a mistyped path silently
+# lands a file beside books/ and wallpapers/ instead of inside one of them
+c="$(code -u "$OWNER" -T /dev/null "${LAN}/${MANAGER_ENDPOINT}/.biblioteca-stray")"
+case "$c" in
+  401|403) check_ok "/${MANAGER_ENDPOINT} itself refuses uploads (http $c)" ;;
+  *)       check_fail "/${MANAGER_ENDPOINT} accepted an upload (http $c) — it should only list its children"
+           curl -sS --max-time 20 -o /dev/null -u "$OWNER" -X DELETE \
+                "${LAN}/${MANAGER_ENDPOINT}/.biblioteca-stray" 2>/dev/null || true ;;
+esac
+if [ -n "${GUEST_ACCOUNT:-}" ] && [ -n "${GUEST_PASSWORD:-}" ]; then
   G="${GUEST_ACCOUNT}:${GUEST_PASSWORD}"
+  want 200 "$(code -u "$G" "$OPDS_URL")"    "guest '${GUEST_ACCOUNT}' can read the library"
+  want 403 "$(code -u "$G" "$MANAGER_URL")" "guest '${GUEST_ACCOUNT}' cannot reach the manager"
+  PROBE_G="${LAN}/${BOOKS_ENDPOINT}/.biblioteca-guest-probe"
+  c="$(code -u "$G" -X DELETE "$PROBE_G")"
+  case "$c" in
+    401|403) check_ok "guest DELETE refused (http $c)" ;;
+    *)       check_fail "guest DELETE returned http $c — your friends can delete!" ;;
+  esac
+else
+  check_skip "no guest account configured"
+fi
 
-  GBODY="$(curl -sS --max-time 20 -u "$G" "$OPDS_URL" 2>/dev/null || true)"
-  if printf '%s' "$GBODY" | grep -qi '<feed'; then
-    check_ok "guest '${GUEST_ACCOUNT}' can browse the catalogue"
-  else
-    check_fail "guest '${GUEST_ACCOUNT}' cannot read the catalogue"
-  fi
-
-  # probe a path that does not exist, so no real book can be touched even if
-  # the permissions turn out to be wrong
-  PROBE="${LAN}/books/.biblioteca-write-probe"
-  for m in DELETE MOVE; do
-    hdr=(); [ "$m" = "MOVE" ] && hdr=(-H "Destination: ${PROBE}-2")
-    c="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -u "$G" -X "$m" "${hdr[@]}" "$PROBE" 2>/dev/null || echo 000)"
+# (d) the default paths must not answer, or the point of renaming is lost
+if [ "$BOOKS_ENDPOINT" != "books" ] || [ "$MANAGER_ENDPOINT" != "manager" ]; then
+  for d in books manager; do
+    c="$(code -u "$OWNER" "${LAN}/${d}/")"
     case "$c" in
-      401|403) check_ok "guest $m refused (http $c)" ;;
-      *)       check_fail "guest $m returned http $c - your friends can $m!" ;;
+      404|403) check_ok "/${d} is not a door here (http $c)" ;;
+      *)       check_fail "/${d} answered http $c — a stock-layout guess still works" ;;
     esac
   done
+else
+  check_skip "paths are still the defaults — set BOOKS_ENDPOINT/MANAGER_ENDPOINT in library.env"
+fi
 
-  c="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -u "$G" -T /dev/null "$PROBE" 2>/dev/null || echo 000)"
+# (e) the administrative endpoints really are off, not merely hidden
+for q in ru stack scan "reload=cfg"; do
+  c="$(code -u "$OWNER" "${LAN}/?${q}")"
   case "$c" in
-    401|403) check_ok "guest upload refused (http $c)" ;;
-    *)       check_fail "guest upload returned http $c - your friends can upload!"
-             curl -sS --max-time 20 -o /dev/null -u "${COPYPARTY_ACCOUNT}:${COPYPARTY_PASSWORD}" \
-                  -X DELETE "$PROBE" 2>/dev/null || true ;;
+    200) check_fail "?${q} still answers (http 200) — the trim flags did not apply" ;;
+    *)   check_ok "?${q} refused (http $c)" ;;
   esac
+done
+
+if body -u "$OWNER" "$BOOKS_URL" | grep -q 'GiB free of'; then
+  check_fail "the listing still advertises disk capacity — check du-who"
+else
+  check_ok "disk capacity is not disclosed"
+fi
+
+# (f) wallpapers: their own door, their own format list
+if [ "$WALLPAPERS_ENABLED" != "1" ]; then
+  check_skip "wallpapers disabled (WALLPAPERS_ENABLED=0)"
+  # 404 or 403 depending on whether the landing volume swallows the path;
+  # either way it is not a door
+  c="$(code -u "$OWNER" "$WALLPAPERS_URL")"
+  case "$c" in
+    403|404) check_ok "/${WALLPAPERS_ENDPOINT} is not served (http $c)" ;;
+    *)       check_fail "/${WALLPAPERS_ENDPOINT} answered http $c with wallpapers disabled" ;;
+  esac
+else
+  want 403 "$(code "$WALLPAPERS_OPDS_URL")"            "a stranger cannot reach the wallpapers"
+  want 200 "$(code -u "$OWNER" "$WALLPAPERS_OPDS_URL")" "you can browse the wallpapers"
+  want 200 "$(code -u "$OWNER" "$WALLPAPERS_MGR_URL")"  "you can manage them at /${MANAGER_ENDPOINT}/wallpapers"
+
+  c="$(code -u "$OWNER" -X DELETE "${LAN}/${WALLPAPERS_ENDPOINT}/.biblioteca-write-probe")"
+  case "$c" in
+    401|403) check_ok "the wallpapers door is read-only too (http $c)" ;;
+    *)       check_fail "DELETE through /${WALLPAPERS_ENDPOINT} returned http $c" ;;
+  esac
+
+  # books and wallpapers must not list each other's formats
+  if body -u "$OWNER" "$OPDS_URL" | grep -qiE '\.(bmp|pxc)<'; then
+    check_fail "the book catalogue is listing images — check the per-volume opds_exts"
+  else
+    check_ok "no images in the book catalogue"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -182,10 +265,10 @@ if [ -z "${TS_HOST:-}" ]; then
   check_skip "not logged into a tailnet - run 40-tailscale.sh"
 else
   check_ok "tailnet hostname: $TS_HOST"
-  if $SUDO tailscale funnel status 2>/dev/null | grep -q "${COPYPARTY_PORT}"; then
-    check_ok "funnel maps to local port ${COPYPARTY_PORT}"
+  if $SUDO tailscale funnel status 2>/dev/null | grep -q "${SERVER_PORT}"; then
+    check_ok "funnel maps to local port ${SERVER_PORT}"
   else
-    check_fail "funnel does not appear to point at port ${COPYPARTY_PORT}"
+    check_fail "funnel does not appear to point at port ${SERVER_PORT}"
     $SUDO tailscale funnel status 2>/dev/null | sed 's/^/        /' || true
   fi
 
@@ -239,8 +322,8 @@ cat <<EOF
     ┌──────────┬────────────────────────────────────────────────────────────┐
     │ Name     │ Home                                                       │
     │ URL      │ ${OPDS_URL}
-    │ User     │ ${COPYPARTY_ACCOUNT}
-    │ Password │ ${COPYPARTY_PASSWORD:-<see library.env>}
+    │ User     │ ${MANAGER_ACCOUNT}
+    │ Password │ ${MANAGER_PASSWORD:-<see library.env>}
     └──────────┴────────────────────────────────────────────────────────────┘
 EOF
 
@@ -248,9 +331,9 @@ if [ -n "${TS_HOST:-}" ]; then
 cat <<EOF
     ┌──────────┬────────────────────────────────────────────────────────────┐
     │ Name     │ Away                                                       │
-    │ URL      │ https://${TS_HOST}/books/?opds
-    │ User     │ ${COPYPARTY_ACCOUNT}
-    │ Password │ ${COPYPARTY_PASSWORD:-<see library.env>}
+    │ URL      │ https://${TS_HOST}/${BOOKS_ENDPOINT}/?opds
+    │ User     │ ${MANAGER_ACCOUNT}
+    │ Password │ ${MANAGER_PASSWORD:-<see library.env>}
     └──────────┴────────────────────────────────────────────────────────────┘
 EOF
 fi
@@ -270,8 +353,24 @@ fi
 
 cat <<EOF
 
-  Upload books from your phone:  ${BOOKS_URL}
-  Also set:  Background Server -> Only on Charge
+  Your doors:
+    landing (everyone) ${LAN}/
+    reading (you+guest) ${BOOKS_URL}
+    manage  (you only)  ${MANAGER_URL}
+                        ${MANAGER_BOOKS_URL}      <- upload books here
+                        ${WALLPAPERS_MGR_URL}  <- upload wallpapers here
+
+  Wallpapers (add as a SECOND OPDS server on the reader):
+    browse  ${WALLPAPERS_URL}
+    OPDS    ${WALLPAPERS_OPDS_URL}
+    Sleep screens are BMP at 480x800 (X4) or 528x792 (X3), or PXC.
+    Open one in Browse Files on the reader and set it as the sleep cover.
+
+  Note: /${BOOKS_ENDPOINT} is read-only for you too. That is deliberate — it is
+  what makes your reading view identical to your guests'. Go to
+  /${MANAGER_ENDPOINT}/books to add, rename or delete books.
+
+  Also set on the reader:  Background Server -> Only on Charge
 
   Still manual, because only you can do them:
     8.  reader on home wifi  -> browse "Home" -> download a book

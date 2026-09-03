@@ -75,7 +75,7 @@ if [ "$RESET" = "1" ]; then
 fi
 
 if [ "$DRY_RUN" = "1" ]; then
-  info "[dry-run] would run: $SUDO tailscale funnel --bg ${COPYPARTY_PORT}"
+  info "[dry-run] would run: $SUDO tailscale funnel --bg ${SERVER_PORT}"
 else
   info "MagicDNS + HTTPS certificates must be enabled for the tailnet."
   info "The CLI provisions the cert and adds the 'funnel' node attribute;"
@@ -83,7 +83,7 @@ else
   echo
   # --bg persists: it resumes after reboot and after `tailscale down/up`,
   # so no extra systemd unit is needed for this.
-  $SUDO tailscale funnel --bg "${COPYPARTY_PORT}"
+  $SUDO tailscale funnel --bg "${SERVER_PORT}"
   echo
   $SUDO tailscale funnel status | sed 's/^/    /'
 fi
