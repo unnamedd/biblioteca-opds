@@ -306,6 +306,63 @@ route its tethered hotspot clients through its own VPN tunnel
 tailnet-only URL is unreachable from the reader. That is the entire reason this
 setup uses Funnel rather than `tailscale serve`.
 
+It is also expected when **both** `TAILSCALE_ENABLED` and `CLOUDFLARE_ENABLED`
+are `0`: that is LAN-only by configuration. Turn one on and re-run the
+installer; `scripts/50-verify.sh` says which Away URL applies.
+
+## The short address (Cloudflare) does not answer
+
+Work down the chain:
+
+- **Cloudflare error 1033 / "tunnel not found"** — the connector is not
+  registered. `sudo journalctl -u cloudflared -n 40`: no *Registered tunnel
+  connection* means the token is wrong or the service is down. The token is in
+  `/etc/cloudflared/tunnel.env`; re-run `scripts/45-cloudflare.sh` after fixing
+  `library.env`.
+- **It redirects somewhere else entirely** — a *Redirect Rule* matching
+  **All incoming requests** runs at Cloudflare's edge before anything reaches
+  the tunnel, and it applies to every hostname in the zone, the new one
+  included; a rule sending the bare domain to some other site is the usual
+  culprit. Edit the rule and switch it to a *Custom filter expression* scoped
+  to the names it was meant for:
+  `(http.host eq "<domain>") or (http.host eq "www.<domain>")`.
+  `50-verify.sh` reports this case explicitly.
+  After fixing it, a browser that visited the name *before* the fix may keep
+  redirecting: it cached the **301**, which means "permanent". `curl -I` will
+  show the truth. Confirm in a private window, then clear that site's data in
+  the browser.
+- **502 Bad Gateway from Cloudflare** — the tunnel is up but nothing answers on
+  the Pi. `systemctl status copyparty`, and in the dashboard check the Public
+  Hostname's *Service* is `http://localhost:<SERVER_PORT>` (not https, not the
+  LAN IP).
+- **The reader rejects the certificate** — it verifies against bundled CA
+  roots. Cloudflare's chain (Google Trust Services / Let's Encrypt) is in
+  ESP-IDF's bundle, but confirm what is actually served:
+  `openssl s_client -connect your-shelf.<domain>:443 -servername your-shelf.<domain>
+  </dev/null | openssl x509 -noout -ext subjectAltName`. Expect `*.<domain>`
+  — that wildcard is also why the name is not in CT logs.
+- **An upload fails only through the short address** — Cloudflare's free plan
+  caps request bodies at 100 MB. Use the LAN or Funnel address for that file.
+
+Funnel keeps working independently, so a Cloudflare outage never locks you
+out — that is why the plan keeps both.
+
+## Everyone is banned at the same time
+
+copyparty's `ban-pw` bans by client IP. Behind a tunnel every request reaches
+copyparty from `127.0.0.1`, so the real IP has to come from a header. If the
+header *name* copyparty reads (`xff-hdr`) does not match what the proxy sends,
+every visitor looks like `127.0.0.1`, and one wrong password bans all of them —
+you included. Both Funnel and Cloudflare send `X-Forwarded-For`, so
+`xff-hdr: x-forwarded-for` is correct for both; do not change it to
+`cf-connecting-ip`.
+
+`rproxy: -1` matters too: Cloudflare *appends* the real client to that header,
+so the rightmost entry is the true one. With `rproxy: 1` an attacker seeding the
+header could dodge the ban by changing the seed.
+
+Bans live in memory: `sudo systemctl restart copyparty` clears them.
+
 ## Out of memory / the Pi grinds
 
 ```bash

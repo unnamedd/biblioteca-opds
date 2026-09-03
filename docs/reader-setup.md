@@ -41,14 +41,20 @@ If `.local` does not resolve on the reader, use the Pi's IP instead —
 `http://192.168.x.x/books/?opds` — and set a DHCP reservation on your router so
 the address stops moving.
 
-### Away — over Tailscale Funnel
+### Away — over the internet
 
-| field | value |
+Which URL depends on the remote entrance(s) enabled in `library.env`:
+
+| entrance | URL |
 |---|---|
-| Name | `Away` |
-| URL | `https://<pi>.<tailnet>.ts.net/books/?opds` |
-| Username | `reader` |
-| Password | (same) |
+| Cloudflare Tunnel (`CLOUDFLARE_ENABLED=1`) | `https://your-shelf.<your-domain>/books/?opds` — short, on your own domain |
+| Tailscale Funnel (`TAILSCALE_ENABLED=1`) | `https://<pi>.<tailnet>.ts.net/books/?opds` |
+
+Username and password are the same as Home. If you have both, save the short
+one as `Away` and keep the Funnel one written down as a fallback rather than as
+another entry — CrossPoint stores 8, but three stay legible.
+`scripts/50-verify.sh` prints exactly the rows that apply. With neither
+enabled the library is LAN-only by configuration and there is no Away entry.
 
 This is the one you use with the reader on your phone's hotspot. It works
 because Funnel presents a publicly-trusted Let's Encrypt certificate, and the
@@ -69,6 +75,7 @@ on the reader (CrossPoint stores up to 8):
 | URL | `http://biblioteca.local/wallpapers/?opds` (or your `WALLPAPERS_ENDPOINT`) |
 | Username / Password | the same account you use for books |
 
+Away from home, use the same `/wallpapers/?opds` path on your Away address.
 Then: browse that catalogue, download an image, open it in **Browse Files**, and
 set it as the sleep cover from the image viewer. It does not need to be in
 `/.sleep` — the viewer can set any BMP it can open.
@@ -93,7 +100,7 @@ What to put in `/srv/wallpapers` (upload at `/manager/wallpapers/`):
 ## Uploading books from your phone
 
 Open `http://biblioteca.local/manager/books/` in the phone's browser (or the
-`https://<pi>.<tailnet>.ts.net/manager/books/` URL when away), log in with your
+`https://your-shelf.<your-domain>/manager/books/` — or the `ts.net` one — when away), log in with your
 own account, and drag the book in. **Note the path**: `/books/` is the reading
 door and is read-only for everyone, you included — uploads there return 403.
 `/manager/` is the one that accepts them. It appears in the OPDS feed immediately — there

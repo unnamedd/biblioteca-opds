@@ -1,0 +1,40 @@
+# Cloudflare Tunnel connector for Biblioteca. Rendered by scripts/45-cloudflare.sh.
+#
+# Deliberately NOT the unit `cloudflared service install <token>` would write:
+# that bakes the token into ExecStart, and unit files are world-readable. The
+# token lives in /etc/cloudflared/tunnel.env (0600 root:root), read by systemd
+# before privileges drop, so the unprivileged service user never needs to open it.
+
+[Unit]
+Description=Cloudflare Tunnel (Biblioteca)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cloudflared
+Group=cloudflared
+EnvironmentFile=/etc/cloudflared/tunnel.env
+ExecStart=__CLOUDFLARED_BIN__ --no-autoupdate tunnel run
+
+# the requirement: come back if the process dies
+Restart=always
+RestartSec=5
+
+# outbound-only; it only ever talks to Cloudflare and to copyparty on localhost
+StateDirectory=cloudflared
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+
+# 512 MB board; cloudflared idles around 30-50 MB
+MemoryMax=25%
+
+[Install]
+WantedBy=multi-user.target

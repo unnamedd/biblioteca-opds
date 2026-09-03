@@ -19,6 +19,10 @@ Values in `<angle brackets>` come from `library.env`. The defaults are:
 | `SERVER_PORT` | `80` |
 | `BOOKS_DIR` | `/srv/books` |
 | `SERVICE_USER` | `copyparty` |
+| `TAILSCALE_ENABLED` | `1` |
+| `CLOUDFLARE_ENABLED` | `0` |
+| `PUBLIC_HOSTNAME` | *(unset)* |
+| `CLOUDFLARE_TUNNEL_TOKEN` | *(unset)* |
 
 Everything below runs **on the Pi**.
 
@@ -199,7 +203,7 @@ sudo tee /etc/copyparty.conf >/dev/null <<'EOF'
 
   xff-hdr: x-forwarded-for
   xff-src: 127.0.0.1
-  rproxy: 1
+  rproxy: -1
 
 [accounts]
   reader: PASTE_YOUR_PASSWORD_HERE
@@ -273,8 +277,14 @@ What each line is for:
   (`ENABLE_COVERS=1` in `library.env` does all of this for you).
 - `e2d` — the up2k index, which gives you search and deduplication cheaply.
 - `hist:` — keeps the index out of the books folder itself.
-- `xff-*` / `rproxy: 1` — Tailscale terminates TLS and proxies from localhost,
-  setting `X-Forwarded-For` / `-Proto` / `-Host`. This trusts exactly that hop.
+- `xff-*` / `rproxy: -1` — Funnel and Cloudflare Tunnel both terminate TLS and
+  proxy from localhost, setting `X-Forwarded-For`; `xff-src` trusts exactly
+  that hop. `-1` attributes a request to the *rightmost* entry — the one the
+  nearest proxy appended, i.e. the real client. This matters for `ban-pw`:
+  with `1` (leftmost) a client can seed the header and dodge a ban by changing
+  the seed, and with a header *name* that does not match what the proxy sends,
+  every request looks like `127.0.0.1` and one wrong password bans everyone.
+  Verified against copyparty; `-1` is correct for both tunnels.
 
 Two behaviours worth knowing:
 
@@ -388,6 +398,10 @@ After editing `/etc/copyparty.conf`, `sudo systemctl reload copyparty` is enough
 
 ## 40 — Tailscale Funnel
 
+Skipped entirely when `TAILSCALE_ENABLED=0` in `library.env`: nothing installed,
+nothing exposed, and an existing Tailscale setup is left alone. Everything below
+is what happens when it is `1`.
+
 **Funnel, not Serve.** The reader is an ESP32-C3 and cannot join the tailnet,
 and a phone does not route hotspot-tethered clients through its own VPN, so
 a tailnet-only URL is unreachable from the reader when you are out. Funnel gives
@@ -419,6 +433,89 @@ sudo tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.
 ```
 
 ---
+
+## 45 — Cloudflare Tunnel (a short address on your own domain)
+
+Skipped entirely when `CLOUDFLARE_ENABLED=0`. Funnel cannot serve a custom
+domain — its certificate is only valid for `*.ts.net` — so a short name needs a
+tunnel that brings its own certificate. Cloudflare's is a *wildcard* for your
+domain, which means the subdomain never appears in Certificate Transparency
+logs (Funnel's name does). The trade-off: Cloudflare terminates TLS at its edge
+and sees the traffic in the clear, passwords included. Funnel does not. Both,
+either, or neither can be on.
+
+**Once, in the Cloudflare Zero Trust dashboard** (the domain's DNS must be hosted
+at Cloudflare; the free plan is enough):
+
+1. *Networks → Tunnels → Create a tunnel → Cloudflared*, give it a name.
+2. Copy the token it shows into `library.env` as `CLOUDFLARE_TUNNEL_TOKEN`.
+3. *Public Hostname*: subdomain `your-shelf` (or yours), your domain, path empty;
+   *Service*: `HTTP`, `localhost:80` (your `SERVER_PORT`). Cloudflare creates the
+   DNS record.
+
+The tunnel's configuration lives at Cloudflare, so after an SD-card rebuild the
+same token simply reattaches the same tunnel.
+
+If the zone already has a **Redirect Rule** matching *All incoming requests* —
+a bare domain sent to some other site, say — it will catch the new hostname too,
+since redirect rules run at the edge before the tunnel. Scope it to the names it
+was meant for with a custom filter expression:
+`(http.host eq "<domain>") or (http.host eq "www.<domain>")`.
+
+**On the Pi:**
+
+```bash
+# the .deb from GitHub; armhf = 32-bit Raspberry Pi OS, arm64 = 64-bit
+curl -fsSL -o /tmp/cloudflared.deb \
+  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-armhf.deb
+sudo dpkg -i /tmp/cloudflared.deb && rm /tmp/cloudflared.deb
+
+sudo useradd --system --shell /usr/sbin/nologin --home-dir /var/lib/cloudflared cloudflared
+
+# the token, readable by root only; systemd reads it before dropping privileges
+sudo mkdir -p /etc/cloudflared
+printf 'TUNNEL_TOKEN=%s\n' 'PASTE_THE_TOKEN_HERE' | sudo tee /etc/cloudflared/tunnel.env >/dev/null
+sudo chmod 0600 /etc/cloudflared/tunnel.env
+```
+
+Do **not** use `cloudflared service install <token>`: it writes the token into the
+unit's `ExecStart`, and unit files are world-readable. This unit keeps it in the
+0600 file above:
+
+```bash
+sudo tee /etc/systemd/system/cloudflared.service >/dev/null <<'EOF'
+[Unit]
+Description=Cloudflare Tunnel (Biblioteca)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cloudflared
+Group=cloudflared
+EnvironmentFile=/etc/cloudflared/tunnel.env
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run
+Restart=always
+RestartSec=5
+StateDirectory=cloudflared
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+MemoryMax=25%
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now cloudflared
+sudo journalctl -u cloudflared -n 20      # look for "Registered tunnel connection"
+curl -sI https://your-shelf.YOUR-DOMAIN/ | head -1
+```
+
+Cloudflare's free plan caps request bodies at 100 MB — use the LAN or Funnel
+address for anything bigger. Downloads are unlimited.
 
 ## 50 — Verifying
 
@@ -498,6 +595,7 @@ sudo systemctl restart copyparty
 
 ```bash
 sudo tailscale funnel reset
+sudo systemctl disable --now cloudflared; sudo rm -rf /etc/cloudflared /etc/systemd/system/cloudflared.service
 sudo systemctl disable --now copyparty avahi-alias@biblioteca
 sudo rm -f /etc/systemd/system/copyparty.service \
            /etc/systemd/system/avahi-alias@.service \

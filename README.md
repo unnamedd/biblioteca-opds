@@ -15,6 +15,8 @@ A self-hosted OPDS library for devices running [CrossPoint Reader](https://githu
   your friends get; uploads and deletes live behind a second path.
 - **Sleep-screen wallpapers on their own endpoint** — BMP and PXC for the
   reader's sleep screen, served separately so they never mix into the books.
+- **Remote access is optional, per entrance.** Tailscale Funnel, a Cloudflare
+  Tunnel on your own domain, both, or neither — LAN-only is a supported setup.
 - **Nothing about the layout is stock.** The title, both paths and the listed
   formats are all configurable, so knowing this project doesn't tell an
   attacker where anything is.
@@ -77,6 +79,7 @@ Then read [docs/reader-setup.md](docs/reader-setup.md).
 | `scripts/20-mdns.sh`      | publishes `biblioteca.local`                 |
 | `scripts/30-copyparty.sh` | the OPDS + upload server, under systemd      |
 | `scripts/40-tailscale.sh` | Funnel (interactive the first time)          |
+| `scripts/45-cloudflare.sh`| short address on your own domain, optional   |
 | `scripts/50-verify.sh`    | end-to-end assertions + the reader config    |
 | `scripts/99-uninstall.sh` | reverses it all; keeps your books            |
 | `config/`                 | the real config files, templated             |
@@ -104,6 +107,11 @@ whole design:
    through its own VPN tunnel — they get the plain cellular connection
    ([tailscale#14980](https://github.com/tailscale/tailscale/issues/14980)).
    **Tailscale Funnel** is what actually works — public HTTPS, password-protected.
+   The other way to get a publicly-trusted certificate without opening a port
+   is a **Cloudflare Tunnel**, which also gives you a short name on your own
+   domain — at the price of Cloudflare terminating TLS and seeing the traffic,
+   passwords included, where Funnel relays only ciphertext. Both are optional
+   and independent (`TAILSCALE_ENABLED`, `CLOUDFLARE_ENABLED`).
 
 2. **It verifies TLS against bundled CA roots.** From the firmware's
    `src/network/HttpDownloader.cpp`: _"the model is public servers over verified
@@ -127,7 +135,9 @@ proxy in front.
 
 - Raspberry Pi running Debian/Raspbian with systemd (developed against
   bullseye/armv7; 64-bit works too)
-- A Tailscale account, with MagicDNS and HTTPS certificates enabled
+- For access away from home, at least one of: a Tailscale account (MagicDNS
+  and HTTPS certificates enabled), or a domain whose DNS is hosted at
+  Cloudflare. Neither is needed for LAN-only use.
 - CrossPoint firmware **≥ 1.3.0**
 
 ## Credits

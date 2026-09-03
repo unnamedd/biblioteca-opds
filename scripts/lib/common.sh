@@ -111,6 +111,13 @@ WALLPAPERS_DIR="${WALLPAPERS_DIR:-/srv/wallpapers}"
 # bmp and pxc are what the device can actually open; png is stored but not listed
 WALLPAPERS_EXTS="${WALLPAPERS_EXTS:-bmp,pxc}"
 
+# Remote access. Either, both, or neither entrance can be on; with both off
+# the server is reachable on the LAN only and nothing is installed for it.
+TAILSCALE_ENABLED="${TAILSCALE_ENABLED:-1}"
+CLOUDFLARE_ENABLED="${CLOUDFLARE_ENABLED:-0}"
+PUBLIC_HOSTNAME="${PUBLIC_HOSTNAME:-}"
+CLOUDFLARE_TUNNEL_TOKEN="${CLOUDFLARE_TUNNEL_TOKEN:-}"
+
 load_env() {
   if [ -f "$ENV_FILE" ]; then
     # library.env is sourced as shell, so an unquoted value containing a space
@@ -150,6 +157,8 @@ load_env() {
   WALLPAPERS_ENDPOINT="${WALLPAPERS_ENDPOINT:-wallpapers}"
   WALLPAPERS_DIR="${WALLPAPERS_DIR:-/srv/wallpapers}"
   WALLPAPERS_EXTS="${WALLPAPERS_EXTS:-bmp,pxc}"
+  TAILSCALE_ENABLED="${TAILSCALE_ENABLED:-1}"
+  CLOUDFLARE_ENABLED="${CLOUDFLARE_ENABLED:-0}"
   WALLPAPERS_ENDPOINT="$(trim_path "$WALLPAPERS_ENDPOINT")"
   # tolerate "/books", "books/" or "/books/" in library.env
   BOOKS_ENDPOINT="$(trim_path "$BOOKS_ENDPOINT")"
@@ -163,6 +172,17 @@ load_env() {
     for _e in "$BOOKS_ENDPOINT" "$MANAGER_ENDPOINT"; do
       [ "$WALLPAPERS_ENDPOINT" != "$_e" ] || die "WALLPAPERS_ENDPOINT must differ from $_e"
     done
+  fi
+  if [ "$CLOUDFLARE_ENABLED" = "1" ]; then
+    [ -n "$PUBLIC_HOSTNAME" ] || die "CLOUDFLARE_ENABLED=1 but PUBLIC_HOSTNAME is empty (e.g. your-shelf.example.com)"
+    [ -n "$CLOUDFLARE_TUNNEL_TOKEN" ] || die "CLOUDFLARE_ENABLED=1 but CLOUDFLARE_TUNNEL_TOKEN is empty — Zero Trust -> Networks -> Tunnels -> your tunnel"
+    # tolerate a pasted URL
+    PUBLIC_HOSTNAME="$(printf '%s' "$PUBLIC_HOSTNAME" | sed -e 's|^https\{0,1\}://||' -e 's|/.*$||')"
+    # Cloudflare's free wildcard certificate covers one label below the
+    # registered domain; deeper names get no certificate at all
+    case "$PUBLIC_HOSTNAME" in
+      *.*.*.*) warn "PUBLIC_HOSTNAME has several labels; the free wildcard cert may not cover it (use x.<domain>)" ;;
+    esac
   fi
 }
 
@@ -223,6 +243,9 @@ manager_books_url() { printf '%s/%s/books/' "$(lan_url)" "$MANAGER_ENDPOINT"; }
 wallpapers_url()      { printf '%s/%s/' "$(lan_url)" "$WALLPAPERS_ENDPOINT"; }
 wallpapers_opds_url() { printf '%s/%s/?opds' "$(lan_url)" "$WALLPAPERS_ENDPOINT"; }
 wallpapers_mgr_url()  { printf '%s/%s/wallpapers/' "$(lan_url)" "$MANAGER_ENDPOINT"; }
+
+# The short public address, when Cloudflare Tunnel is on.
+public_url() { printf 'https://%s' "$PUBLIC_HOSTNAME"; }
 
 tailnet_hostname() {
   have tailscale || return 1

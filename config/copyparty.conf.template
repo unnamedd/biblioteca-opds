@@ -72,11 +72,18 @@ __THUMB_LINE__
   # actually protects; this only keeps the UI clean.
   html-head: <style>#cc,.agr,#v{display:none!important}</style>
 
-  # Tailscale Serve/Funnel terminates TLS and proxies from localhost,
-  # setting X-Forwarded-{For,Proto,Host}. Trust exactly that one hop.
+  # Tailscale Funnel and Cloudflare Tunnel both terminate TLS and proxy from
+  # localhost, setting X-Forwarded-For. Trust exactly that one hop (xff-src).
+  #
+  # rproxy: -1 attributes a request to the RIGHTMOST X-Forwarded-For entry:
+  # the one appended by the proxy nearest to us, i.e. the real client. Tested
+  # against copyparty: with 1 (leftmost) a client can seed the header and
+  # dodge ban-pw by changing the seed; with a header NAME that does not match
+  # what the proxy sends, every request looks like 127.0.0.1 and one wrong
+  # password bans everybody. -1 is correct for both tunnels; inert with none.
   xff-hdr: x-forwarded-for
   xff-src: 127.0.0.1
-  rproxy: 1
+  rproxy: -1
 
 __BAN_PW_LINE__
 

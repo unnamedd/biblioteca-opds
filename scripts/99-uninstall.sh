@@ -43,6 +43,18 @@ else
   info "tailscale not installed - nothing to clear"
 fi
 
+step "Cloudflare tunnel"
+if [ -f /etc/systemd/system/cloudflared.service ]; then
+  run $SUDO systemctl disable --now cloudflared 2>/dev/null || true
+  run $SUDO rm -f /etc/systemd/system/cloudflared.service
+  run $SUDO rm -rf /etc/cloudflared /var/lib/cloudflared
+  run $SUDO systemctl daemon-reload
+  id -u cloudflared >/dev/null 2>&1 && { run $SUDO userdel cloudflared || true; }
+  ok "removed the tunnel service, token and user (cloudflared package left installed)"
+else
+  info "no cloudflared service - nothing to remove"
+fi
+
 step "copyparty"
 run $SUDO systemctl disable --now copyparty 2>/dev/null || true
 run $SUDO rm -f /etc/systemd/system/copyparty.service /etc/copyparty.conf /usr/local/bin/copyparty-sfx.py

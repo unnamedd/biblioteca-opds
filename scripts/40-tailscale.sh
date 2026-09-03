@@ -7,6 +7,9 @@
 # firmware requires: it verifies HTTPS against the bundled CA roots.
 #
 # This step is interactive the first time (browser login + admin approval).
+#
+# Skipped entirely when TAILSCALE_ENABLED=0: nothing installed, nothing
+# exposed, and an existing Tailscale setup is left exactly as it is.
 
 . "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 
@@ -28,6 +31,14 @@ for a in "${REMAINING_ARGS[@]:-}"; do
 done
 
 load_env
+
+if [ "$TAILSCALE_ENABLED" != "1" ]; then
+  step "Tailscale"
+  info "skipped (TAILSCALE_ENABLED=0): LAN only. Nothing installed, nothing exposed;"
+  info "an existing Tailscale setup, if any, is left exactly as it is."
+  exit 0
+fi
+
 require_sudo
 
 # --- install -----------------------------------------------------------------
@@ -39,7 +50,7 @@ else
   info "installing via https://tailscale.com/install.sh"
   hint "on Raspbian bullseye armhf this selects pkgs.tailscale.com/stable/raspbian/bullseye"
   run_sh "curl -fsSL https://tailscale.com/install.sh | sh"
-  have tailscale || die "tailscale install failed"
+  [ "$DRY_RUN" = "1" ] || have tailscale || die "tailscale install failed"
   ok "installed"
 fi
 
@@ -92,7 +103,7 @@ fi
 TS_HOST="$(tailnet_hostname || true)"
 echo
 if [ -n "${TS_HOST:-}" ]; then
-  printf '%s==> away URL: https://%s/books/?opds%s\n' "$C_GRN" "$TS_HOST" "$C_RESET"
+  printf '%s==> away URL: https://%s/%s/?opds%s\n' "$C_GRN" "$TS_HOST" "$BOOKS_ENDPOINT" "$C_RESET"
 else
   printf '%s==> funnel configured%s\n' "$C_GRN" "$C_RESET"
 fi

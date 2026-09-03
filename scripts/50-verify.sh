@@ -45,7 +45,17 @@ step "1. services are running"
 for u in copyparty avahi-daemon "avahi-alias@${SERVER_HOSTNAME}.service"; do
   if unit_active "$u"; then check_ok "$u active"; else check_fail "$u NOT active"; fi
 done
-if unit_active tailscaled; then check_ok "tailscaled active"; else check_fail "tailscaled NOT active"; fi
+if [ "$TAILSCALE_ENABLED" = "1" ]; then
+  if unit_active tailscaled; then check_ok "tailscaled active"; else check_fail "tailscaled NOT active"; fi
+else
+  check_skip "tailscaled (TAILSCALE_ENABLED=0)"
+fi
+if [ "$CLOUDFLARE_ENABLED" = "1" ]; then
+  if unit_active cloudflared; then check_ok "cloudflared active"; else check_fail "cloudflared NOT active"; fi
+  if unit_enabled cloudflared; then check_ok "cloudflared enabled at boot"; else check_fail "cloudflared NOT enabled at boot"; fi
+else
+  check_skip "cloudflared (CLOUDFLARE_ENABLED=0)"
+fi
 
 for u in copyparty "avahi-alias@${SERVER_HOSTNAME}.service"; do
   if unit_enabled "$u"; then
@@ -260,8 +270,11 @@ fi
 # ---------------------------------------------------------------------------
 step "6. Tailscale Funnel"
 
-TS_HOST="$(tailnet_hostname || true)"
-if [ -z "${TS_HOST:-}" ]; then
+TS_HOST=""
+[ "$TAILSCALE_ENABLED" = "1" ] && TS_HOST="$(tailnet_hostname || true)"
+if [ "$TAILSCALE_ENABLED" != "1" ]; then
+  check_skip "Tailscale is off (TAILSCALE_ENABLED=0)"
+elif [ -z "${TS_HOST:-}" ]; then
   check_skip "not logged into a tailnet - run 40-tailscale.sh"
 else
   check_ok "tailnet hostname: $TS_HOST"
@@ -312,6 +325,58 @@ RSS="$(ps -o rss= -C python3 2>/dev/null | awk '{s+=$1} END {print int(s/1024)}'
 [ -n "${RSS:-}" ] && info "copyparty (python3) RSS: ${RSS} MB"
 
 # ---------------------------------------------------------------------------
+step "8. short address (Cloudflare Tunnel)"
+
+PUB=""
+if [ "$CLOUDFLARE_ENABLED" != "1" ]; then
+  check_skip "Cloudflare is off (CLOUDFLARE_ENABLED=0)"
+  if [ "$TAILSCALE_ENABLED" != "1" ]; then
+    hint "both remote entrances are off: the reader works at home only."
+    hint "set TAILSCALE_ENABLED=1 or CLOUDFLARE_ENABLED=1 for access away from home"
+  fi
+else
+  PUB="$(public_url)"
+  DOMAIN="${PUBLIC_HOSTNAME#*.}"
+  if $SUDO journalctl -u cloudflared --since "1 hour ago" --no-pager 2>/dev/null \
+       | grep -q 'Registered tunnel connection'; then
+    check_ok "tunnel registered with Cloudflare"
+  else
+    check_fail "no 'Registered tunnel connection' in cloudflared's log — token, or the dashboard hostname?"
+  fi
+  c="$(code "${PUB}/")"
+  case "$c" in
+    200) check_ok "landing page answers at ${PUBLIC_HOSTNAME}" ;;
+    301|302|307|308)
+      # A zone-wide Redirect Rule ("All incoming requests" -> some other site)
+      # runs at Cloudflare's edge before anything reaches the tunnel, and it
+      # catches every hostname in the zone - this one too.
+      check_fail "${PUBLIC_HOSTNAME} redirects (http $c) to $(curl -sS --max-time 10 -o /dev/null -w '%{redirect_url}' "${PUB}/" 2>/dev/null)"
+      hint "a Redirect Rule matching 'All incoming requests' catches this hostname too."
+      hint "scope it with a custom filter expression, e.g."
+      hint "  (http.host eq \"${DOMAIN}\") or (http.host eq \"www.${DOMAIN}\")" ;;
+    *)   check_fail "landing page at ${PUBLIC_HOSTNAME} returned http $c" ;;
+  esac
+  want 403 "$(code "${PUB}/${BOOKS_ENDPOINT}/?opds")"              "a stranger cannot read through the short address"
+  want 200 "$(code -u "$OWNER" "${PUB}/${BOOKS_ENDPOINT}/?opds")"  "you can read through the short address"
+
+  # the "not in CT logs" property, checked rather than assumed: the served
+  # certificate must be the wildcard for your domain, not one naming this host
+  if have openssl; then
+    SAN="$(openssl s_client -connect "${PUBLIC_HOSTNAME}:443" -servername "${PUBLIC_HOSTNAME}" </dev/null 2>/dev/null \
+           | openssl x509 -noout -ext subjectAltName 2>/dev/null || true)"
+    if printf '%s' "$SAN" | grep -q "\*\.${DOMAIN}"; then
+      check_ok "certificate is the wildcard *.${DOMAIN} — this name is not in CT logs"
+    elif [ -n "$SAN" ]; then
+      check_fail "certificate names the host explicitly — it will appear in CT logs"
+    else
+      check_skip "could not read the certificate (is the tunnel up?)"
+    fi
+  else
+    check_skip "openssl not installed - cannot inspect the certificate"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 step "Reader configuration"
 
 cat <<EOF
@@ -327,7 +392,17 @@ cat <<EOF
     └──────────┴────────────────────────────────────────────────────────────┘
 EOF
 
-if [ -n "${TS_HOST:-}" ]; then
+if [ -n "${PUB:-}" ]; then
+cat <<EOF
+    ┌──────────┬────────────────────────────────────────────────────────────┐
+    │ Name     │ Away                                                       │
+    │ URL      │ ${PUB}/${BOOKS_ENDPOINT}/?opds
+    │ User     │ ${MANAGER_ACCOUNT}
+    │ Password │ ${MANAGER_PASSWORD:-<see library.env>}
+    └──────────┴────────────────────────────────────────────────────────────┘
+EOF
+  [ -n "${TS_HOST:-}" ] && printf '    fallback via Tailscale: https://%s/%s/?opds\n' "$TS_HOST" "$BOOKS_ENDPOINT"
+elif [ -n "${TS_HOST:-}" ]; then
 cat <<EOF
     ┌──────────┬────────────────────────────────────────────────────────────┐
     │ Name     │ Away                                                       │
@@ -335,6 +410,13 @@ cat <<EOF
     │ User     │ ${MANAGER_ACCOUNT}
     │ Password │ ${MANAGER_PASSWORD:-<see library.env>}
     └──────────┴────────────────────────────────────────────────────────────┘
+EOF
+else
+cat <<EOF
+
+  No "Away" entry: LAN only by configuration. The reader works at home; set
+  TAILSCALE_ENABLED=1 or CLOUDFLARE_ENABLED=1 in library.env for access away
+  from home.
 EOF
 fi
 
@@ -363,7 +445,8 @@ cat <<EOF
   Wallpapers (add as a SECOND OPDS server on the reader):
     browse  ${WALLPAPERS_URL}
     OPDS    ${WALLPAPERS_OPDS_URL}
-    Sleep screens are BMP at 480x800 (X4) or 528x792 (X3), or PXC.
+${PUB:+    away    ${PUB}/${WALLPAPERS_ENDPOINT}/?opds
+}    Sleep screens are BMP at 480x800 (X4) or 528x792 (X3), or PXC.
     Open one in Browse Files on the reader and set it as the sleep cover.
 
   Note: /${BOOKS_ENDPOINT} is read-only for you too. That is deliberate — it is

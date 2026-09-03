@@ -3,31 +3,30 @@
 #
 #   ./install.sh              full install
 #   ./install.sh --dry-run    print what would happen, change nothing
-#   ./install.sh --skip-tailscale
 #
 # Every step is idempotent, so re-running after a failure is safe.
 
 . "$(dirname "${BASH_SOURCE[0]}")/scripts/lib/common.sh"
 
 print_usage() { cat <<'USAGE'
-usage: ./install.sh [--dry-run] [--skip-tailscale] [--no-ban]
+usage: ./install.sh [--dry-run] [--no-ban]
 
 Runs, in order:
   scripts/00-preflight.sh    check every assumption
   scripts/10-system.sh       packages, zram, service user, /srv/books
   scripts/20-mdns.sh         publish <alias>.local
   scripts/30-copyparty.sh    OPDS + upload server under systemd
-  scripts/40-tailscale.sh    Funnel (interactive on first run)
+  scripts/40-tailscale.sh    Funnel (interactive on first run; TAILSCALE_ENABLED)
+  scripts/45-cloudflare.sh   short address on your domain (CLOUDFLARE_ENABLED)
 
 Then run scripts/50-verify.sh separately.
 USAGE
 }
 
-SKIP_TS=0; PASS_THROUGH=()
+PASS_THROUGH=()
 parse_common_flags "$@"
 for a in "${REMAINING_ARGS[@]:-}"; do
   case "$a" in
-    --skip-tailscale) SKIP_TS=1 ;;
     --no-ban) PASS_THROUGH+=(--no-ban) ;;
     "") ;;
     *) die "unknown argument: $a" ;;
@@ -51,6 +50,7 @@ info "alias   : ${SERVER_HOSTNAME}.local"
 info "account : ${MANAGER_ACCOUNT}"
 info "port    : ${SERVER_PORT}"
 info "books   : ${BOOKS_DIR}"
+info "remote  : tailscale=$([ "$TAILSCALE_ENABLED" = 1 ] && echo on || echo off)  cloudflare=$([ "$CLOUDFLARE_ENABLED" = 1 ] && echo "on (${PUBLIC_HOSTNAME})" || echo off)"
 [ "$DRY_RUN" = "1" ] && warn "DRY RUN - nothing will be changed"
 
 bash "$REPO_ROOT/scripts/00-preflight.sh"  "${DRY_FLAG[@]}"
@@ -58,12 +58,9 @@ bash "$REPO_ROOT/scripts/10-system.sh"     "${DRY_FLAG[@]}"
 bash "$REPO_ROOT/scripts/20-mdns.sh"       "${DRY_FLAG[@]}"
 bash "$REPO_ROOT/scripts/30-copyparty.sh"  "${DRY_FLAG[@]}" "${PASS_THROUGH[@]:-}"
 
-if [ "$SKIP_TS" = "1" ]; then
-  step "Tailscale"
-  info "skipped (--skip-tailscale). The LAN URL works; remote access does not."
-else
-  bash "$REPO_ROOT/scripts/40-tailscale.sh" "${DRY_FLAG[@]}"
-fi
+# each of these no-ops when its toggle in library.env is 0
+bash "$REPO_ROOT/scripts/40-tailscale.sh"  "${DRY_FLAG[@]}"
+bash "$REPO_ROOT/scripts/45-cloudflare.sh" "${DRY_FLAG[@]}"
 
 echo
 printf '%s╔══════════════════════════════════════════════════════════╗%s\n' "$C_GRN" "$C_RESET"
