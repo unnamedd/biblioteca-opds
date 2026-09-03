@@ -1,8 +1,13 @@
 # /etc/copyparty.conf  --  rendered by scripts/30-copyparty.sh
 #
-# Serves __BOOKS_DIR__ as:
-#   - an OPDS catalogue for the Xteink reader   ->  /books/?opds
-#   - a browser upload UI for your phone        ->  /books/
+# Three doors onto one library (nothing is duplicated on disk):
+#
+#   /                 a plain landing page, visible to anyone
+#   /<BOOKS_ENDPOINT>     reading + OPDS. Read-only for EVERYONE, you included.
+#   /<MANAGER_ENDPOINT>   upload / rename / delete. You only.
+#
+# The paths are configurable in library.env precisely so that a stock install
+# of this open-source project is not guessable.
 #
 # Bare lines are boolean flags; "key: value" lines take an argument.
 # Reference: https://copyparty.eu/cli/
@@ -12,8 +17,16 @@
   # grants CAP_NET_BIND_SERVICE so copyparty can bind it without being root.
   p: __PORT__
 
+  # shown top-left in the web UI and over mDNS
+  name: __LIBRARY_TITLE__
+
   # enable the OPDS feed (off by default). Reachable as <volume>/?opds
   opds
+
+  # NOTE: the format list is NOT set here. Each volume carries its own
+  # "opds_exts" volflag below, so the book catalogue lists book formats and
+  # the wallpaper catalogue lists images, with no chance of the two bleeding
+  # into each other.
 
   # cover thumbnails. While no-thumb is set the OPDS feed still emits cover
   # links, but with an empty href, so the reader shows no covers.
@@ -27,8 +40,37 @@ __THUMB_LINE__
   # up2k index: powers search and dedup. Cheap, worth having.
   e2d
 
-  # keep the index/db out of the books folder itself.
-  hist: /var/lib/copyparty/hist
+  # --- keep it off the radar -------------------------------------------
+  # the server is reachable from the public internet through Funnel
+  no-robots
+
+  # --- administrative endpoints: off -----------------------------------
+  # each of these is a link copyparty otherwise offers every visitor under
+  # a heading called "other stuff:". Disabling them here means the endpoint
+  # itself refuses, not merely that the link is hidden.
+  no-ups-page          # ?ru          "show recent uploads"
+  no-stack             # ?stack       thread dump
+  no-rescan            # ?scan        reindex
+  no-reload            # ?reload=cfg  reload users/volumes
+  no-up-list           # incoming-file list in the control panel
+  ups-who: 0           # nobody sees the recent-uploads page
+  du-who: no           # stop telling visitors "N GiB free of M GiB"
+  ver-who: no          # do not advertise the copyparty version
+  zip-who: 1           # only admins may tar/zip the whole library
+
+  # --- books only: no audio/video machinery ----------------------------
+  no-acode             # no audio transcoding
+  no-athumb            # no spectrograms
+  no-vthumb            # no video thumbnails
+  no-mtag-ff           # no ffprobe media tagging
+  no-logues            # do not render .prologue/.epilogue.html from the books folder
+  no-readme            # ...nor README.md
+
+  # Cosmetic only: hides the dead links the flags above leave behind.
+  # "#cc" is the "other stuff:" heading, ".agr" the link block, "#v" connect.
+  # The markup still exists in the page source -- the flags above are what
+  # actually protects; this only keeps the UI clean.
+  html-head: <style>#cc,.agr,#v{display:none!important}</style>
 
   # Tailscale Serve/Funnel terminates TLS and proxies from localhost,
   # setting X-Forwarded-{For,Proto,Host}. Trust exactly that one hop.
@@ -41,15 +83,4 @@ __BAN_PW_LINE__
 [accounts]
 __ACCOUNTS_LINES__
 
-[/books]
-  __BOOKS_DIR__
-  accs:
-    # r=read w=upload m=move/rename d=delete. Without "d" the web UI and
-    # WebDAV both answer 403 "'delete' not allowed"; without "m" you cannot
-    # rename either. Use "A" instead for rwmda. (adds admin + dotfiles).
-    # Set GUEST_ACCOUNT in library.env to add a second, read-only account:
-    # friends sign in with their own password, browse and download the whole
-    # library, and cannot upload, rename or delete anything.
-__ACCS_LINES__
-  flags:
-    opds
+__VOLUMES__
