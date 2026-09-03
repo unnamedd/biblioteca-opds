@@ -1,4 +1,4 @@
-# Setting up the reader
+# 📚 Setting up the reader
 
 Applies to the Xteink X3 / X4 / X4 Pro running CrossPoint. Requires firmware
 **≥ 1.3.0** — that release fixed OPDS handling of relative paths and query
@@ -30,7 +30,7 @@ CrossPoint stores up to **8** OPDS servers, so keep both and switch as needed.
 | field | value |
 |---|---|
 | Name | `Home` |
-| URL | `http://biblioteca.local/books/?opds` |
+| URL | `http://biblioteca.local/books/?opds` (or your `BOOKS_ENDPOINT`) |
 | Username | `reader` |
 | Password | (from `library.env`) |
 
@@ -58,6 +58,32 @@ would be rejected.
 Passwords are hidden after saving; leaving the field blank on a later edit keeps
 the existing one.
 
+## Sleep-screen wallpapers
+
+The wallpapers live behind their own OPDS feed, so add a **second** OPDS server
+on the reader (CrossPoint stores up to 8):
+
+| field | value |
+|---|---|
+| Name | `Wallpapers` |
+| URL | `http://biblioteca.local/wallpapers/?opds` (or your `WALLPAPERS_ENDPOINT`) |
+| Username / Password | the same account you use for books |
+
+Then: browse that catalogue, download an image, open it in **Browse Files**, and
+set it as the sleep cover from the image viewer. It does not need to be in
+`/.sleep` — the viewer can set any BMP it can open.
+
+What to put in `/srv/wallpapers` (upload at `/manager/wallpapers/`):
+
+- **BMP** at exactly **480×800** for the X4, **528×792** for the X3.
+- **PXC**, CrossPoint's native wallpaper format — about a tenth the size of a
+  24-bit BMP, which matters when you are pulling it over Funnel on a device
+  with 380 KB of RAM.
+- **PNG is not listed**, on purpose: the reader cannot open a standalone PNG,
+  so it would only appear as an entry that fails when tapped. PNGs you store
+  there stay visible and downloadable from a browser, which is handy for
+  keeping the source image next to the converted one.
+
 ## Other settings worth changing
 
 - **Background Server → Only on Charge.** Keeps the reader reachable for
@@ -66,9 +92,11 @@ the existing one.
 
 ## Uploading books from your phone
 
-Open `http://biblioteca.local/books/` in the phone's browser (or the
-`https://<pi>.<tailnet>.ts.net/books/` URL when away), log in with the same
-account, and drag the EPUB in. It appears in the OPDS feed immediately — there
+Open `http://biblioteca.local/manager/books/` in the phone's browser (or the
+`https://<pi>.<tailnet>.ts.net/manager/books/` URL when away), log in with your
+own account, and drag the book in. **Note the path**: `/books/` is the reading
+door and is read-only for everyone, you included — uploads there return 403.
+`/manager/` is the one that accepts them. It appears in the OPDS feed immediately — there
 is no import step, because the catalogue is just the folder.
 
 Name files `Author - Title.epub`. The catalogue is filename-based, so the

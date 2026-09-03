@@ -1,4 +1,4 @@
-# Biblioteca
+# 📚 Biblioteca
 
 A self-hosted OPDS library for devices running [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader), hosted on a **Raspberry Pi Zero 2 W** (512 MB, 32-bit armv7, Raspbian bullseye).
 
@@ -10,18 +10,40 @@ A self-hosted OPDS library for devices running [CrossPoint Reader](https://githu
 - **A second, read-only account for friends** — they get their own password,
   browse and download the whole library (no copies, no separate folder), and
   cannot upload, rename or delete (`GUEST_ACCOUNT`).
+- **Reading and administration are separate doors.** The reading path is
+  read-only for *everyone*, you included, so your view is the same clean one
+  your friends get; uploads and deletes live behind a second path.
+- **Sleep-screen wallpapers on their own endpoint** — BMP and PXC for the
+  reader's sleep screen, served separately so they never mix into the books.
+- **Nothing about the layout is stock.** The title, both paths and the listed
+  formats are all configurable, so knowing this project doesn't tell an
+  attacker where anything is.
 - Starts at boot and restarts if it dies.
 
 ```
-                AT HOME                                 AWAY FROM HOME
-  reader ── WiFi ──┐                          reader ── phone hotspot ── internet
-                   │                                           │
-  http://biblioteca.local/books/?opds      https://<pi>.<tailnet>.ts.net/books/?opds
-                   │                                           │
-                   ▼                                           ▼
-             copyparty :80  ◄───────────────────── tailscaled (Funnel :443)
-                   │
-              /srv/books   (plain folders of .epub)
+                    AT HOME                             AWAY
+   reader ── WiFi ──┐                     reader ── phone hotspot ── internet
+                    │                                       │
+                    ▼                                       ▼
+      http://biblioteca.local           https://<pi>.<tailnet>.ts.net
+                    │                                       │
+                    └─────────────────┬─────────────────────┘
+                                      ▼
+                                copyparty :80
+                                      │
+        ┌──────────────┬──────────────┴───────────┬──────────────────┐
+        ▼              ▼                          ▼                  ▼
+       /            /books/                 /wallpapers/         /manager/
+  landing page  read-only: you           read-only: you          you only
+  anyone,         and friends               and friends       ┌──────┴──────┐
+  no login            │                          │            ▼             ▼
+                      │                          │        /books/    /wallpapers/
+                      │                          │            │             │
+                      └──────────┬───────────────┼────────────┘             │
+                                 ▼               └──────────┬───────────────┘
+                           /srv/books                       ▼
+                      (one folder, no copies)        /srv/wallpapers
+                                                      (sleep screens)
 ```
 
 ## Quick start
@@ -58,6 +80,8 @@ Then read [docs/reader-setup.md](docs/reader-setup.md).
 | `scripts/50-verify.sh`    | end-to-end assertions + the reader config    |
 | `scripts/99-uninstall.sh` | reverses it all; keeps your books            |
 | `config/`                 | the real config files, templated             |
+| `config/landing/`         | the public landing page, templated           |
+| `library.env.example`     | every setting, grouped by feature            |
 | `docs/RUNBOOK.md`         | **every step by hand**, 1:1 with the scripts |
 | `docs/reader-setup.md`    | what to enter on the device                  |
 | `docs/troubleshooting.md` | symptom → cause → fix                        |

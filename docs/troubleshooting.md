@@ -1,4 +1,4 @@
-# Troubleshooting
+# 📚 Troubleshooting
 
 ## `biblioteca.local` does not resolve
 
@@ -91,6 +91,35 @@ then `sudo systemctl reload copyparty` (the unit reloads on `SIGUSR1`, so no
 restart is needed). Re-running `scripts/30-copyparty.sh` does the same thing
 from the template and keeps the Pi reproducible.
 
+## Which door am I supposed to use?
+
+Biblioteca serves one folder through three URLs, so that reading never shows
+you administrative controls:
+
+| path | login | what you get |
+| ---- | ----- | ------------ |
+| `/` | none | the landing page |
+| `/<BOOKS_ENDPOINT>` | you or a guest | browse, download, OPDS — **read-only for everyone** |
+| `/<MANAGER_ENDPOINT>` | you only | upload, rename, delete |
+
+`BOOKS_ENDPOINT` and `MANAGER_ENDPOINT` live in `library.env` and default to `books`
+and `manager`. Change them: Biblioteca is open source, so the stock layout is
+public knowledge, and picking your own names means someone scanning for a known
+project finds nothing at the obvious URLs. It is obscurity layered on top of the
+passwords, not a replacement for them.
+
+`/<MANAGER_ENDPOINT>/` is a container, not a folder: it lists exactly two
+children and accepts no uploads itself, so a mistyped path cannot dump a file
+beside them.
+
+| upload this | to here |
+| ----------- | ------- |
+| books | `/<MANAGER_ENDPOINT>/books/` |
+| wallpapers | `/<MANAGER_ENDPOINT>/wallpapers/` |
+
+If uploading suddenly returns **403**, you are on the reading door or on the
+container itself. Go one level in.
+
 ## Sharing the library with friends
 
 Give them their own read-only account rather than your password. Set in
@@ -108,23 +137,36 @@ then re-run `scripts/30-copyparty.sh`. It renders:
   reader: <your password>
   friends: <their password>
 
-[/books]
+[/books]                 # the reading door: read-only for EVERYONE
   /srv/books
   accs:
-    r: friends     # list + download; enough for the web UI and for OPDS
-    rwmd: reader   # only you
+    r: friends
+    r: reader
+  flags:
+    opds
+    hist: /var/lib/copyparty/hist/books
+
+[/manager]               # the management door: you alone
+  /srv/books
+  accs:
+    rwmd: reader
+  flags:
+    hist: /var/lib/copyparty/hist/manager
 ```
 
-Nothing is copied and no second folder is needed — it is the same library seen
-through a weaker login. Verified behaviour:
+Nothing is copied and no second folder is needed — one folder, two doors.
+Verified behaviour:
 
-| action | anonymous | `friends` | you |
-| ------ | --------- | --------- | --- |
-| browse the OPDS feed | 403 | **200** | 200 |
-| download a book | 403 | **200** | 200 |
-| upload | 401 | **401** | 201 |
-| delete | 401 | **401** | 200 |
-| rename | 401 | **401** | 200 |
+| action | anonymous | `friends` | you via `/books` | you via `/manager` |
+| ------ | --------- | --------- | ---------------- | ------------------ |
+| browse the OPDS feed | 403 | **200** | 200 | 200 |
+| download a book | 403 | **200** | 200 | 200 |
+| upload | 401 | **401** | **403** | 201 |
+| delete | 401 | **401** | **403** | 200 |
+| rename | 401 | **401** | **403** | 201 |
+
+That `403` column is deliberate: the reading door is read-only for you too, so
+your view is identical to your friends'. Uploads and deletes go to `/manager`.
 
 Friends can point their own OPDS apps at the same URL. To revoke, clear
 `GUEST_ACCOUNT` and re-run the script; your own login is unaffected.
@@ -136,6 +178,27 @@ friends write access fails the run instead of going unnoticed.
 `r: friends` opens the library to everyone. Think twice with Funnel on: that
 means the public internet, and Funnel hostnames are published to Certificate
 Transparency logs, so the address is discoverable rather than secret.
+
+## A wallpaper does not show up on the reader
+
+Wallpapers are a separate feed. Check, in order:
+
+1. **Is it in the right place?** They live in `WALLPAPERS_DIR`
+   (`/srv/wallpapers`), not in the books folder. Upload at
+   `/<MANAGER_ENDPOINT>/wallpapers/`.
+2. **Is the format listed?** `WALLPAPERS_EXTS` defaults to `bmp,pxc`. A `.png`
+   is stored but deliberately not listed — the reader cannot open a standalone
+   PNG, so an entry for it would only fail when tapped. Convert it first.
+3. **Did you add the second OPDS server?** The books feed will never show
+   wallpapers; that is the point. The reader needs its own entry pointing at
+   `/<WALLPAPERS_ENDPOINT>/?opds`.
+4. **Are the dimensions right?** 480×800 on the X4, 528×792 on the X3. A
+   wrong-sized BMP may open but look wrong as a sleep screen.
+5. **Is the feature on?** `WALLPAPERS_ENABLED=0` renders neither volume, and
+   `/<WALLPAPERS_ENDPOINT>/` returns 404.
+
+To set one: open it in **Browse Files** on the reader and choose "set as sleep
+screen" from the image viewer. It does not have to be in `/.sleep`.
 
 ## No cover images in the catalogue
 

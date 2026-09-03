@@ -1,4 +1,4 @@
-# Runbook — doing all of it by hand
+# 📚 Runbook — doing all of it by hand
 
 Every section here matches the script with the same number, so section 30 is
 exactly what `scripts/30-copyparty.sh` does. Use this when a script fails, when
@@ -9,9 +9,14 @@ Values in `<angle brackets>` come from `library.env`. The defaults are:
 
 | variable | default |
 |---|---|
-| `LIBRARY_ALIAS` | `biblioteca` |
-| `COPYPARTY_ACCOUNT` | `reader` |
-| `COPYPARTY_PORT` | `80` |
+| `LIBRARY_TITLE` | `Biblioteca` |
+| `SERVER_HOSTNAME` | `biblioteca` |
+| `BOOKS_ENDPOINT` | `books` |
+| `MANAGER_ENDPOINT` | `manager` |
+| `LANDING_DIR` | `/srv/landing` |
+| `MANAGER_ACCOUNT` | `reader` |
+| `GUEST_ACCOUNT` | *(unset)* |
+| `SERVER_PORT` | `80` |
 | `BOOKS_DIR` | `/srv/books` |
 | `SERVICE_USER` | `copyparty` |
 
@@ -35,7 +40,7 @@ systemctl is-active avahi-daemon
 ip -4 route get 1.1.1.1        # note the "src" address - that is your LAN IP
 ```
 
-If something already owns port 80, either stop it or set `COPYPARTY_PORT=3923`
+If something already owns port 80, either stop it or set `SERVER_PORT=3923`
 in `library.env`; every URL below then gains `:3923`.
 
 ---
@@ -63,9 +68,12 @@ swapon --show
 
 ```bash
 sudo useradd --system --shell /usr/sbin/nologin --home-dir /var/lib/copyparty copyparty
-sudo mkdir -p /var/lib/copyparty/hist /srv/books
-sudo chown -R copyparty:copyparty /var/lib/copyparty /srv/books
-sudo chmod 0755 /srv/books
+# one hist per volume: copyparty refuses to start if two share a histpath,
+# and /srv/books is mounted twice (reading + management)
+sudo mkdir -p /var/lib/copyparty/hist/{landing,books,wallpapers,manager-root,manager-books,manager-wallpapers} \
+             /var/lib/copyparty/manager-root /srv/books /srv/landing /srv/wallpapers
+sudo chown -R copyparty:copyparty /var/lib/copyparty /srv/books /srv/landing
+sudo chmod 0755 /srv/books /srv/landing
 ```
 
 ---
@@ -163,23 +171,87 @@ python3 -c 'import secrets,string; a=string.ascii_letters+string.digits; print("
 sudo tee /etc/copyparty.conf >/dev/null <<'EOF'
 [global]
   p: 80
+  name: Biblioteca
   opds
+  opds-exts: epub,xtc,xtch,txt,pdf,md,cbz,cbr,azw3,mobi,fb2
   no-thumb
   e2d
-  hist: /var/lib/copyparty/hist
+
+  no-robots
+  no-ups-page
+  no-stack
+  no-rescan
+  no-reload
+  no-up-list
+  ups-who: 0
+  du-who: no
+  ver-who: no
+  zip-who: 1
+
+  no-acode
+  no-athumb
+  no-vthumb
+  no-mtag-ff
+  no-logues
+  no-readme
+
+  html-head: <style>#cc,.agr,#v{display:none!important}</style>
+
   xff-hdr: x-forwarded-for
   xff-src: 127.0.0.1
   rproxy: 1
 
 [accounts]
-  reader: PASTE_THE_PASSWORD_HERE
+  reader: PASTE_YOUR_PASSWORD_HERE
+  friends: PASTE_THEIR_PASSWORD_HERE
+
+[/]
+  /srv/landing
+  accs:
+    h: *
+    rwmd: reader
+  flags:
+    hist: /var/lib/copyparty/hist/landing
 
 [/books]
   /srv/books
   accs:
-    rwmd: reader
+    r: friends
+    r: reader
   flags:
     opds
+    hist: /var/lib/copyparty/hist/books
+
+[/manager]
+  /var/lib/copyparty/manager-root      # always empty: lists its two children
+  accs:
+    r: reader
+  flags:
+    hist: /var/lib/copyparty/hist/manager-root
+
+[/manager/books]
+  /srv/books
+  accs:
+    rwmd: reader
+  flags:
+    hist: /var/lib/copyparty/hist/manager-books
+
+[/wallpapers]
+  /srv/wallpapers
+  accs:
+    r: friends
+    r: reader
+  flags:
+    opds
+    opds_exts: bmp,pxc
+    hist: /var/lib/copyparty/hist/wallpapers
+
+[/manager/wallpapers]
+  /srv/wallpapers
+  accs:
+    rwmd: reader
+  flags:
+    hist: /var/lib/copyparty/hist/manager-wallpapers
 EOF
 sudo chown root:copyparty /etc/copyparty.conf
 sudo chmod 0640 /etc/copyparty.conf
@@ -209,26 +281,41 @@ Two behaviours worth knowing:
 - `rwmd` is read + write + move + delete. `rw` alone is not enough: the web UI
   and WebDAV both answer `403 'delete' not allowed` and renaming fails too.
   `A` is the shorthand for `rwmda.`, which also grants admin and dotfiles.
-- To share with friends, add a second account and give it `r` only. Nothing is
-  duplicated — it is the same folder, seen through a weaker login:
+- **Three doors, one folder.** `/srv/books` is mounted twice, at different URL
+  paths with different permissions. Nothing is duplicated on disk.
 
-  ```ini
-  [accounts]
-    reader: <your password>
-    friends: <their password>
+  | path | who | what |
+  |---|---|---|
+  | `/` | everyone (`h: *`) | the landing page; the folder itself is not listable |
+  | `/books` | `r: friends`, `r: reader` | reading + OPDS, read-only for *everyone* |
+  | `/manager` | `rwmd: reader` | upload, rename, delete |
 
-  [/books]
-    /srv/books
-    accs:
-      r: friends     # browse and download, nothing else
-      rwmd: reader   # you: upload, rename, delete
-  ```
-
-  `GUEST_ACCOUNT=friends` in `library.env` renders exactly that, generating a
-  separate password if you leave `GUEST_PASSWORD` blank. Because it is its own
-  account you can change or drop it later without touching your own login, and
-  the library is never exposed to anyone without a password.
-- `--opds-exts` defaults to `epub,cbz,pdf`. Add `mobi,azw3` if you keep those.
+  The reading door being read-only *for you too* is the point: browsing it your
+  account reports `perms: ["read","get"]` — exactly what a guest sees — so
+  copyparty renders the same stripped-down UI. Go to `/manager` to change
+  anything. `BOOKS_ENDPOINT` and `MANAGER_ENDPOINT` in `library.env` set those two
+  names; pick your own so a stock install is not guessable.
+- **Each volume needs its own `hist:`.** Mounting one folder twice with a shared
+  histpath makes copyparty refuse to start:
+  `invalid config; multiple volumes share the same histpath`.
+- `GUEST_ACCOUNT=friends` generates a separate password if `GUEST_PASSWORD` is
+  blank. Because it is its own account you can change or drop it without
+  touching your own login, and the library is never open to anyone without one.
+- **The trim flags disable endpoints, they do not merely hide links.** `?ru`
+  answers *"listing of recent uploads is disabled in server config"*, and
+  `?stack` / `?scan` / `?reload=cfg` return 403. `du-who: no` stops the listing
+  header advertising `N GiB free of M GiB`. The `html-head` CSS is cosmetic
+  only — it hides the dead links copyparty still renders under a heading called
+  "other stuff:", but the markup remains in the page source.
+- **`opds_exts` is per-volume, not global.** That is what keeps the two
+  catalogues apart: the books volume lists book formats, the wallpapers volume
+  lists `bmp,pxc`, and neither can show the other's files. A `.png` dropped in
+  `/srv/wallpapers` is stored and downloadable from a browser but never
+  reaches the reader — which is deliberate, because the device cannot open a
+  standalone PNG.
+- `opds_exts` picks which formats the catalogue lists. The reader itself opens
+  only `epub`, `xtc`/`xtch` and `txt`; `pdf`, `md`, `cbz`, `azw3`, `mobi` and
+  `fb2` list and download fine but are for reading on a phone or computer.
 - copyparty is **password-only** by default: the username field is ignored, and
   the password is accepted in *either* HTTP Basic field. CrossPoint sends a
   normal `user:pass` header, so it just works.
@@ -349,6 +436,17 @@ getent hosts biblioteca.local
 
 # the feed is real OPDS
 curl -sS -u reader:PASSWORD 'http://biblioteca.local/books/?opds' | head -40
+
+# the reading door is read-only even for you (expect 403)
+curl -sS -o /dev/null -w '%{http_code}\n' -u reader:PASSWORD \
+  -X DELETE 'http://biblioteca.local/books/.probe'
+
+# ...and the manager door is not (expect 404: allowed, file just absent)
+curl -sS -o /dev/null -w '%{http_code}\n' -u reader:PASSWORD \
+  -X DELETE 'http://biblioteca.local/manager/.probe'
+
+# the landing page is public
+curl -sS 'http://biblioteca.local/' | head -5
 
 # and is not readable without credentials
 curl -sS -o /dev/null -w '%{http_code}\n' 'http://biblioteca.local/books/?opds'
